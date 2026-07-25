@@ -3,7 +3,7 @@ set -e
 cd "$(dirname "$0")/.."
 python3 -m http.server 8799 --bind 127.0.0.1 >/dev/null 2>&1 &
 server=$!
-trap 'kill $server 2>/dev/null' EXIT
+trap 'kill $server 2>/dev/null || true' EXIT
 sleep 1
 chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 fail=0

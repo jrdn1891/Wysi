@@ -60,11 +60,11 @@ async function run() {
   await wait(1300);
   check('trail faded out after a second', alphaAt(240, 200) === 0);
 
-  pointer('pointerdown', 300, 300);
+  pointer('pointerdown', 150, 150);
   await wait(400);
-  check('hold without moving lasers', alphaAt(300, 300) > 0);
-  pointer('pointerup', 300, 300);
-  click(300, 300);
+  check('hold without moving lasers', alphaAt(150, 150) > 0);
+  pointer('pointerup', 150, 150);
+  click(150, 150);
   await wait(50);
   check('hold click swallowed', advances === 1);
 
