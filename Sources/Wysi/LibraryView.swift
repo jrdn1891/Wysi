@@ -255,10 +255,35 @@ private struct DocCard<Menu: View>: View {
     }
 }
 
+private let thumbnailViewport = NSSize(width: 1280, height: 800)
+
 private final class InertWebView: WKWebView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override var acceptsFirstResponder: Bool { false }
     override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
+}
+
+private final class ThumbnailContainer: NSView {
+    let webView = InertWebView()
+
+    init() {
+        super.init(frame: .zero)
+        addSubview(webView)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        guard frame.width > 0 else { return }
+        let height = frame.height * thumbnailViewport.width / frame.width
+        bounds = NSRect(x: 0, y: 0, width: thumbnailViewport.width, height: height)
+        webView.frame = NSRect(x: 0, y: 0, width: thumbnailViewport.width, height: height)
+    }
 }
 
 private struct DocThumbnail: NSViewRepresentable {
@@ -267,16 +292,15 @@ private struct DocThumbnail: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> WKWebView {
-        InertWebView()
+    func makeNSView(context: Context) -> ThumbnailContainer {
+        ThumbnailContainer()
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {
-        webView.magnification = 0.15
+    func updateNSView(_ container: ThumbnailContainer, context: Context) {
         let key = "\(url.path)|\(mtime.timeIntervalSince1970)"
         guard context.coordinator.key != key else { return }
         context.coordinator.key = key
-        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        container.webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
 
     final class Coordinator {
