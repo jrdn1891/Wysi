@@ -28,7 +28,7 @@
     if (canvas) return;
     canvas = document.createElement('canvas');
     canvas.setAttribute('data-wy-laser', '');
-    canvas.setAttribute('style', 'position:fixed;inset:0;pointer-events:none;z-index:2147483647');
+    canvas.setAttribute('style', 'position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:2147483647');
     document.documentElement.appendChild(canvas);
     ctx = canvas.getContext('2d');
     size();

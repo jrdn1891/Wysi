@@ -49,6 +49,8 @@ async function run() {
   for (let i = 1; i <= 8; i++) pointer('pointermove', 200 + i * 10, 200);
   await wait(50);
   check('drag creates the laser overlay', !!laserCanvas());
+  const box = laserCanvas().getBoundingClientRect();
+  check('overlay displays at viewport size', Math.abs(box.width - innerWidth) < 1 && Math.abs(box.height - innerHeight) < 1, `${box.width}x${box.height} vs ${innerWidth}x${innerHeight}`);
   check('trail visible while held', alphaAt(240, 200) > 0);
   pointer('pointerup', 280, 200);
   click(280, 200);
