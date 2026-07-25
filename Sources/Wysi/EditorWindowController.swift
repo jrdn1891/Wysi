@@ -7,7 +7,6 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
     private static let playItem = NSToolbarItem.Identifier("play")
     private static let undoItem = NSToolbarItem.Identifier("undo")
     private static let redoItem = NSToolbarItem.Identifier("redo")
-    private static let undoRedoItem = NSToolbarItem.Identifier("undoRedo")
     private static let shareItem = NSToolbarItem.Identifier("share")
     private static let themeItem = NSToolbarItem.Identifier("theme")
     private static let addLibraryItem = NSToolbarItem.Identifier("addLibrary")
@@ -23,8 +22,6 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
     private var themePopover: NSPopover?
     private var findAccessory: NSTitlebarAccessoryViewController?
     private let findModel = FindModel()
-    private var undoToolbarItem: NSToolbarItem?
-    private var redoToolbarItem: NSToolbarItem?
 
     private var wysiDocument: WysiDocument? { document as? WysiDocument }
 
@@ -41,13 +38,12 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
     convenience init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.center()
         window.isReleasedWhenClosed = false
-        window.titlebarAppearsTransparent = true
         window.collectionBehavior.insert(.fullScreenPrimary)
         self.init(window: window)
         bridge.controller = self
@@ -58,21 +54,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isInspectable = true
         webView.uiDelegate = self
-        let base = NSVisualEffectView()
-        base.material = .underWindowBackground
-        base.blendingMode = .behindWindow
-        base.state = .followsWindowActiveState
-        window.contentView = base
-        webView.translatesAutoresizingMaskIntoConstraints = false
-        base.addSubview(webView)
-        if let guide = window.contentLayoutGuide as? NSLayoutGuide {
-            NSLayoutConstraint.activate([
-                webView.topAnchor.constraint(equalTo: guide.topAnchor),
-                webView.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
-                webView.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
-                webView.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
-            ])
-        }
+        window.contentView = webView
         self.webView = webView
 
         let toolbar = NSToolbar(identifier: "editor")
@@ -188,12 +170,12 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
 
     @objc private func undoClicked(_ sender: Any?) {
         wysiDocument?.undoManager?.undo()
-        refreshUndoRedo()
+        window?.toolbar?.validateVisibleItems()
     }
 
     @objc private func redoClicked(_ sender: Any?) {
         wysiDocument?.undoManager?.redo()
-        refreshUndoRedo()
+        window?.toolbar?.validateVisibleItems()
     }
 
     func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
@@ -206,23 +188,16 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
 
     private func updateUndoRedoItems() {
         guard let toolbar = window?.toolbar else { return }
-        let present = toolbar.items.contains { $0.itemIdentifier == Self.undoRedoItem }
+        let present = toolbar.items.contains { $0.itemIdentifier == Self.undoItem }
         if mode == "edit" && !present {
-            toolbar.insertItem(withItemIdentifier: Self.undoRedoItem, at: 0)
+            toolbar.insertItem(withItemIdentifier: Self.undoItem, at: 0)
+            toolbar.insertItem(withItemIdentifier: Self.redoItem, at: 1)
         } else if mode != "edit" && present {
             for (index, item) in toolbar.items.enumerated().reversed()
-            where item.itemIdentifier == Self.undoRedoItem {
+            where item.itemIdentifier == Self.undoItem || item.itemIdentifier == Self.redoItem {
                 toolbar.removeItem(at: index)
             }
-            undoToolbarItem = nil
-            redoToolbarItem = nil
         }
-        refreshUndoRedo()
-    }
-
-    private func refreshUndoRedo() {
-        undoToolbarItem?.isEnabled = wysiDocument?.undoManager?.canUndo ?? false
-        redoToolbarItem?.isEnabled = wysiDocument?.undoManager?.canRedo ?? false
     }
 
     @objc private func segmentChanged(_ sender: NSSegmentedControl) {
@@ -264,7 +239,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
             webView.evaluateJavaScript("wysi.load(\(json(wysiDocument?.html ?? "")), '\(mode)')")
         case "changed":
             if let html = body["html"] as? String { wysiDocument?.htmlEdited(html) }
-            refreshUndoRedo()
+            window?.toolbar?.validateVisibleItems()
         case "flushed":
             let pending = pendingFlush
             pendingFlush = nil
@@ -310,26 +285,22 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
             item.target = self
             item.action = #selector(play(_:))
             return item
-        case Self.undoRedoItem:
-            let undo = NSToolbarItem(itemIdentifier: Self.undoItem)
-            undo.label = "Undo"
-            undo.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: "Undo")
-            undo.isBordered = true
-            undo.target = self
-            undo.action = #selector(undoClicked(_:))
-            let redo = NSToolbarItem(itemIdentifier: Self.redoItem)
-            redo.label = "Redo"
-            redo.image = NSImage(systemSymbolName: "arrow.uturn.forward", accessibilityDescription: "Redo")
-            redo.isBordered = true
-            redo.target = self
-            redo.action = #selector(redoClicked(_:))
-            undoToolbarItem = undo
-            redoToolbarItem = redo
-            let group = NSToolbarItemGroup(itemIdentifier: itemIdentifier)
-            group.label = "Undo/Redo"
-            group.subitems = [undo, redo]
-            refreshUndoRedo()
-            return group
+        case Self.undoItem:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Undo"
+            item.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: "Undo")
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(undoClicked(_:))
+            return item
+        case Self.redoItem:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Redo"
+            item.image = NSImage(systemSymbolName: "arrow.uturn.forward", accessibilityDescription: "Redo")
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(redoClicked(_:))
+            return item
         case Self.themeItem:
             let button = NSButton(image: NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "Theme")!, target: self, action: #selector(showTheme(_:)))
             button.bezelStyle = .texturedRounded
@@ -361,7 +332,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.modeItem, Self.playItem, Self.themeItem, Self.shareItem, Self.undoRedoItem, Self.addLibraryItem]
+        [.flexibleSpace, Self.modeItem, Self.playItem, Self.themeItem, Self.shareItem, Self.undoItem, Self.redoItem, Self.addLibraryItem]
     }
 }
 

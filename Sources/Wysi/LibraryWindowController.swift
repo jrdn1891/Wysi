@@ -18,13 +18,12 @@ final class LibraryWindowController: NSWindowController, NSToolbarDelegate, NSSe
     private init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 640),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Library"
         window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
         window.center()
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("WysiLibrary")
