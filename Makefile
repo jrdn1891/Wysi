@@ -9,6 +9,7 @@ app:
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	cp .build/$(CONFIG)/Wysi $(APP)/Contents/MacOS/Wysi
 	cp App/Info.plist $(APP)/Contents/Info.plist
+	cp App/AppIcon.icns $(APP)/Contents/Resources/AppIcon.icns
 	cp -R Editor $(APP)/Contents/Resources/Editor
 	codesign --force --sign - $(APP)
 
