@@ -12,10 +12,13 @@ final class LibraryWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
     private static let sidebarItem = NSToolbarItem.Identifier("sidebar")
     private static let searchItem = NSToolbarItem.Identifier("search")
-    private static let searchIconItem = NSToolbarItem.Identifier("searchIcon")
+    private static let collapsedSearchWidth: CGFloat = 30
+    private static let expandedSearchWidth: CGFloat = 240
 
     private let chrome = LibraryChrome()
-    private var searchToolbarItem: NSSearchToolbarItem?
+    private var searchField: CollapsingSearchField?
+    private var searchWidth: NSLayoutConstraint?
+    private var searchClickMonitor: Any?
 
     private init() {
         let window = NSWindow(
@@ -47,40 +50,53 @@ final class LibraryWindowController: NSWindowController, NSToolbarDelegate, NSSe
         chrome.sidebarVisible.toggle()
     }
 
-    @objc private func expandSearch(_ sender: Any?) {
-        expandSearchField()
-    }
-
     @objc func showFind(_ sender: Any?) {
         expandSearchField()
     }
 
+    private var searchExpanded: Bool {
+        (searchWidth?.constant ?? 0) > Self.collapsedSearchWidth
+    }
+
     private func expandSearchField() {
-        guard let toolbar = window?.toolbar else { return }
-        if let index = toolbar.items.firstIndex(where: { $0.itemIdentifier == Self.searchIconItem }) {
-            toolbar.removeItem(at: index)
-            toolbar.insertItem(withItemIdentifier: Self.searchItem, at: index)
+        guard let searchField, let searchWidth else { return }
+        if !searchExpanded {
+            animateSearch(searchWidth, to: Self.expandedSearchWidth)
+            searchClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                guard let self, let field = self.searchField else { return event }
+                let outside = event.window != self.window
+                    || !field.convert(field.bounds, to: nil).contains(event.locationInWindow)
+                if outside { self.collapseSearchField() }
+                return event
+            }
         }
-        searchToolbarItem?.beginSearchInteraction()
+        window?.makeFirstResponder(searchField)
     }
 
     private func collapseSearchField() {
-        guard let toolbar = window?.toolbar,
-              let index = toolbar.items.firstIndex(where: { $0.itemIdentifier == Self.searchItem })
-        else { return }
-        toolbar.removeItem(at: index)
-        toolbar.insertItem(withItemIdentifier: Self.searchIconItem, at: index)
-        searchToolbarItem = nil
+        guard let searchField, let searchWidth, searchExpanded else { return }
+        if let searchClickMonitor {
+            NSEvent.removeMonitor(searchClickMonitor)
+            self.searchClickMonitor = nil
+        }
+        searchField.stringValue = ""
+        chrome.search = ""
+        animateSearch(searchWidth, to: Self.collapsedSearchWidth)
+        window?.makeFirstResponder(nil)
+    }
+
+    private func animateSearch(_ constraint: NSLayoutConstraint, to width: CGFloat) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.22
+            context.allowsImplicitAnimation = true
+            constraint.animator().constant = width
+            searchField?.superview?.layoutSubtreeIfNeeded()
+        }
     }
 
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSSearchField else { return }
         chrome.search = field.stringValue
-    }
-
-    func controlTextDidEndEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSSearchField, field.stringValue.isEmpty else { return }
-        collapseSearchField()
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -94,19 +110,18 @@ final class LibraryWindowController: NSWindowController, NSToolbarDelegate, NSSe
             item.action = #selector(toggleLibrarySidebar(_:))
             return item
         case Self.searchItem:
-            let item = NSSearchToolbarItem(itemIdentifier: itemIdentifier)
-            item.searchField.placeholderString = "Search titles and content"
-            item.searchField.delegate = self
-            item.preferredWidthForSearchField = 240
-            searchToolbarItem = item
-            return item
-        case Self.searchIconItem:
+            let field = CollapsingSearchField()
+            field.placeholderString = "Search"
+            field.delegate = self
+            field.translatesAutoresizingMaskIntoConstraints = false
+            let width = field.widthAnchor.constraint(equalToConstant: Self.collapsedSearchWidth)
+            width.isActive = true
+            field.onFocus = { [weak self] in self?.expandSearchField() }
+            searchField = field
+            searchWidth = width
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Search"
-            item.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search")
-            item.isBordered = true
-            item.target = self
-            item.action = #selector(expandSearch(_:))
+            item.view = field
             return item
         default:
             return nil
@@ -114,10 +129,20 @@ final class LibraryWindowController: NSWindowController, NSToolbarDelegate, NSSe
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.sidebarItem, .flexibleSpace, Self.searchIconItem]
+        [Self.sidebarItem, .flexibleSpace, Self.searchItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.sidebarItem, .flexibleSpace, Self.searchItem, Self.searchIconItem]
+        [Self.sidebarItem, .flexibleSpace, Self.searchItem]
+    }
+}
+
+final class CollapsingSearchField: NSSearchField {
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { onFocus?() }
+        return became
     }
 }
