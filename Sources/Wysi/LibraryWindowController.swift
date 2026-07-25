@@ -12,8 +12,10 @@ final class LibraryWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
     private static let sidebarItem = NSToolbarItem.Identifier("sidebar")
     private static let searchItem = NSToolbarItem.Identifier("search")
+    private static let searchIconItem = NSToolbarItem.Identifier("searchIcon")
 
     private let chrome = LibraryChrome()
+    private var searchToolbarItem: NSSearchToolbarItem?
 
     private init() {
         let window = NSWindow(
@@ -45,9 +47,40 @@ final class LibraryWindowController: NSWindowController, NSToolbarDelegate, NSSe
         chrome.sidebarVisible.toggle()
     }
 
+    @objc private func expandSearch(_ sender: Any?) {
+        expandSearchField()
+    }
+
+    @objc func showFind(_ sender: Any?) {
+        expandSearchField()
+    }
+
+    private func expandSearchField() {
+        guard let toolbar = window?.toolbar else { return }
+        if let index = toolbar.items.firstIndex(where: { $0.itemIdentifier == Self.searchIconItem }) {
+            toolbar.removeItem(at: index)
+            toolbar.insertItem(withItemIdentifier: Self.searchItem, at: index)
+        }
+        searchToolbarItem?.beginSearchInteraction()
+    }
+
+    private func collapseSearchField() {
+        guard let toolbar = window?.toolbar,
+              let index = toolbar.items.firstIndex(where: { $0.itemIdentifier == Self.searchItem })
+        else { return }
+        toolbar.removeItem(at: index)
+        toolbar.insertItem(withItemIdentifier: Self.searchIconItem, at: index)
+        searchToolbarItem = nil
+    }
+
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSSearchField else { return }
         chrome.search = field.stringValue
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSSearchField, field.stringValue.isEmpty else { return }
+        collapseSearchField()
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -65,6 +98,15 @@ final class LibraryWindowController: NSWindowController, NSToolbarDelegate, NSSe
             item.searchField.placeholderString = "Search titles and content"
             item.searchField.delegate = self
             item.preferredWidthForSearchField = 240
+            searchToolbarItem = item
+            return item
+        case Self.searchIconItem:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Search"
+            item.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search")
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(expandSearch(_:))
             return item
         default:
             return nil
@@ -72,10 +114,10 @@ final class LibraryWindowController: NSWindowController, NSToolbarDelegate, NSSe
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.sidebarItem, .flexibleSpace, Self.searchItem]
+        [Self.sidebarItem, .flexibleSpace, Self.searchIconItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.sidebarItem, .flexibleSpace, Self.searchItem]
+        [Self.sidebarItem, .flexibleSpace, Self.searchItem, Self.searchIconItem]
     }
 }
