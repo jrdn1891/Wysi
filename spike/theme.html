@@ -13,11 +13,12 @@
 @media (min-width: 10px){
   :root{ --pad: 24px; }
 }
-body{ font-family: Arial, sans-serif; color: var(--ink); }
+body{ background:#010203; font-family: Arial, sans-serif; color: var(--ink); }
 .x{ font-family: inherit; }
 </style>
 <pre id="results">running…</pre>
 <div id="content"><h1>Theme target</h1><p>Some text.</p></div>
+<style id="bodysheet">:root{ --spare: #445566; }</style>
 <script>
 const results = [];
 const ops = [];
@@ -84,6 +85,17 @@ async function run() {
   await until(() => ops.length > 0);
   check('body font patched', sheet.textContent.includes("font-family: 'Helvetica Neue', sans-serif"));
   check('unrelated font-family rules untouched', sheet.textContent.includes('font-family: inherit'));
+
+  ops.length = 0;
+  postMessage({ type: 'wy-theme-commit', index: entry('background').index, value: '#0a0b0c' }, '*');
+  await until(() => ops.length > 0);
+  check('hex value patched despite rgb serialization', sheet.textContent.includes('background:#0a0b0c'));
+
+  ops.length = 0;
+  postMessage({ type: 'wy-theme-commit', index: entry('--spare').index, value: '#778899' }, '*');
+  await until(() => ops.length > 0);
+  check('body-hosted stylesheet patched', document.getElementById('bodysheet').textContent.includes('--spare: #778899'));
+  check('op roots at body for body-hosted styles', ops[0].root === 'body' && ops[0].kind === 'setHTML');
 
   const pass = results.every(r => r.ok);
   document.getElementById('results').textContent =

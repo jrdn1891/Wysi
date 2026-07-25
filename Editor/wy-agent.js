@@ -972,18 +972,34 @@
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  function serializedCSSValue(prop, raw) {
+    const probe = document.createElement('div');
+    probe.style.cssText = `${prop}: ${raw}`;
+    return probe.style.getPropertyValue(prop).trim();
+  }
+
   function themeCommit(index, value) {
     const e = themeEntries[index];
     if (!e) return;
     themePending.delete(index);
     renderThemePreview();
-    const re = new RegExp(`(${escapeRe(e.prop)}\\s*:\\s*)${escapeRe(e.value)}(?=\\s*(?:!important\\s*)?[;}])`, 'g');
     const text = e.el.textContent;
-    const patched = text.replace(re, `$1${value}`);
+    const exact = new RegExp(`(${escapeRe(e.prop)}\\s*:\\s*)${escapeRe(e.value)}(?=\\s*(?:!important\\s*)?[;}])`, 'g');
+    let patched = text.replace(exact, `$1${value}`);
+    if (patched === text) {
+      const any = new RegExp(`(${escapeRe(e.prop)}\\s*:\\s*)([^;}!]+)`, 'g');
+      patched = text.replace(any, (match, head, raw) =>
+        serializedCSSValue(e.prop, raw.trim()) === e.value ? `${head}${value}` : match);
+    }
     if (patched === text) return send({ type: 'wy-error', message: `could not update ${e.prop}` });
     e.el.textContent = patched;
-    const path = pathIn(document.head, e.el);
-    if (path) send({ type: 'wy-ops', ops: [{ kind: 'setHTML', root: 'head', path, html: patched }] });
+    let root = 'head';
+    let path = pathIn(document.head, e.el);
+    if (!path) {
+      root = 'body';
+      path = pathOf(e.el);
+    }
+    if (path) send({ type: 'wy-ops', ops: [{ kind: 'setHTML', root, path, html: patched }] });
     scheduleSlides();
     collectTheme();
   }
