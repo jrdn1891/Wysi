@@ -6,11 +6,35 @@
   <h1 id="title">Original heading</h1>
   <p id="para">Original <strong id="bold">rich</strong> paragraph.</p>
   <p id="second">Second paragraph.</p>
+  <img id="pic" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="placeholder" srcset="x.gif 1x" width="40" height="40">
+  <picture id="shell">
+    <source srcset="y.webp" type="image/webp">
+    <img id="inner" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="art" width="40" height="40">
+  </picture>
+  <div id="cards">
+    <div class="card"><h3>Card A</h3></div>
+    <div class="card"><h3>Card B</h3></div>
+    <div class="card"><h3>Card C</h3></div>
+  </div>
 </div>
 <script>
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const results = [];
 const ops = [];
 const got = { flushed: false };
+
+function pngFile() {
+  return new File([Uint8Array.from(atob(PNG_B64), c => c.charCodeAt(0))], 'new.png', { type: 'image/png' });
+}
+
+function dropOn(el) {
+  const r = el.getBoundingClientRect();
+  const dt = new DataTransfer();
+  dt.items.add(pngFile());
+  const at = { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5, dataTransfer: dt };
+  el.dispatchEvent(new DragEvent('dragover', at));
+  el.dispatchEvent(new DragEvent('drop', at));
+}
 
 function check(name, ok, detail) {
   results.push({ name, ok, ...(detail ? { detail } : {}) });
@@ -77,6 +101,51 @@ async function run() {
   await tick();
   const blurOp = ops.find(o => o.kind === 'setHTML');
   check('focusout commits setHTML op', !!blurOp && blurOp.html === 'Changed then blurred');
+
+  ops.length = 0;
+  const img = document.getElementById('pic');
+  const imgPath = pathOf(img);
+  dropOn(img);
+  for (let i = 0; i < 20 && !ops.length; i++) await tick();
+  const srcOp = ops.find(o => o.kind === 'setAttr' && o.name === 'src');
+  const srcsetOp = ops.find(o => o.kind === 'setAttr' && o.name === 'srcset');
+  check('drop emits setAttr src op', !!srcOp);
+  check('src op path resolves to img', !!srcOp && JSON.stringify(srcOp.path) === JSON.stringify(imgPath));
+  check('src is a png data URI', !!srcOp && srcOp.value.startsWith('data:image/png'));
+  check('srcset cleared alongside src', !!srcsetOp && srcsetOp.value === null);
+  check('live img updated too', img.src.startsWith('data:image/png'));
+
+  ops.length = 0;
+  const shell = document.getElementById('shell');
+  const shellPath = pathOf(shell);
+  dropOn(document.getElementById('inner'));
+  for (let i = 0; i < 20 && !ops.length; i++) await tick();
+  const picOp = ops.find(o => o.kind === 'setHTML');
+  check('picture drop emits setHTML on the picture', !!picOp && JSON.stringify(picOp.path) === JSON.stringify(shellPath));
+  check('picture sources flattened away', !!picOp && !picOp.html.includes('<source') && picOp.html.includes('data:image/png'));
+  check('live picture has no sources left', shell.querySelectorAll('source').length === 0);
+
+  ops.length = 0;
+  const cardB = document.querySelectorAll('#cards .card')[1];
+  const bh = cardB.querySelector('h3');
+  const br = bh.getBoundingClientRect();
+  bh.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: br.left + 5, clientY: br.top + 5 }));
+  await tick();
+  const handle = document.querySelector('[data-wy-handle]');
+  check('hovering a repeated unit shows the move handle', !!handle && handle.style.display !== 'none');
+  const hr = handle.getBoundingClientRect();
+  const cardA = document.querySelectorAll('#cards .card')[0];
+  const ar = cardA.getBoundingClientRect();
+  handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX: hr.left + 3, clientY: hr.top + 3 }));
+  await tick();
+  handle.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: ar.left + ar.width / 2, clientY: ar.top + 2 }));
+  await tick();
+  handle.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: ar.left + ar.width / 2, clientY: ar.top + 2 }));
+  await tick();
+  check('handle drag emits move op', ops.some(o => o.kind === 'move'));
+  const order = [...document.querySelectorAll('#cards h3')].map(h => h.textContent);
+  check('card moved before its sibling', JSON.stringify(order) === JSON.stringify(['Card B', 'Card A', 'Card C']), order.join(','));
+  check('drag ghost styling cleaned up', !cardB.getAttribute('style'));
 
   const pass = results.every(r => r.ok);
   document.getElementById('results').textContent =

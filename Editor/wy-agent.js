@@ -5,10 +5,23 @@
   const MEDIA = new Set(['IMG', 'SVG', 'VIDEO', 'PICTURE', 'CANVAS', 'IFRAME']);
   const EDIT_BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH', 'DT', 'DD', 'BLOCKQUOTE', 'FIGCAPTION', 'CAPTION', 'PRE', 'SUMMARY']);
   const EDIT_INLINE = new Set(['A', 'BUTTON', 'LABEL', 'SPAN', 'CODE', 'EM', 'STRONG', 'SMALL', 'TIME', 'B', 'I']);
+  const INLINE_LIMIT = 300 * 1024;
+  const MAX_DIM = 1600;
+  const MAX_DATA = 2.5 * 1024 * 1024;
 
   let editingEl = null;
   let editOrigHtml = null;
   let ring = null;
+  let replacePill = null;
+  let pillImg = null;
+  let filePicker = null;
+  let dropImg = null;
+  let moveHandle = null;
+  let moveLine = null;
+  let moveEl = null;
+  let movingEl = null;
+  let moveSpot = null;
+  let moveOrigOpacity = '';
 
   function send(msg) {
     parent.postMessage(msg, '*');
@@ -302,6 +315,8 @@
   }
 
   document.addEventListener('click', (e) => {
+    if (replacePill && replacePill.contains(e.target)) return;
+    if (moveHandle && moveHandle.contains(e.target)) return;
     if (editingEl && editingEl.contains(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -313,13 +328,299 @@
   }, true);
 
   document.addEventListener('pointermove', (e) => {
-    if (editingEl) return;
+    if (editingEl || movingEl) return;
+    if (replacePill && replacePill.contains(e.target)) return;
+    if (moveHandle && moveHandle.contains(e.target)) return;
     const t = htmlAncestor(e.target);
-    if (!t || mediaAncestor(t)) return hideRing();
+    if (!t) {
+      hideRing();
+      hideReplacePill();
+      hideMoveHandle();
+      return;
+    }
+    showMoveHandle(moveTarget(t));
+    const media = mediaAncestor(t);
+    if (media) {
+      showRing(media, false);
+      showReplacePill(media);
+      return;
+    }
+    hideReplacePill();
     const el = editTarget(t);
     if (el) showRing(el, false);
     else hideRing();
   });
+
+  function ensureReplacePill() {
+    if (replacePill) return replacePill;
+    replacePill = document.createElement('button');
+    replacePill.type = 'button';
+    replacePill.textContent = '↺ replace';
+    replacePill.setAttribute('style', 'position:fixed;z-index:2147483646;display:none;cursor:pointer;font:600 12px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;letter-spacing:.03em;padding:.34rem .55rem;border-radius:6px;border:1px solid;color:#fff;box-shadow:0 2px 10px rgba(15,18,25,.3)');
+    replacePill.style.background = ACCENT;
+    replacePill.style.borderColor = ACCENT;
+    replacePill.addEventListener('mousedown', (e) => e.preventDefault());
+    replacePill.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (pillImg) pickFileFor(pillImg);
+    });
+    document.documentElement.appendChild(replacePill);
+    return replacePill;
+  }
+
+  function inViewport(r) {
+    return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
+  }
+
+  function showReplacePill(media) {
+    if (media.tagName !== 'IMG') return hideReplacePill();
+    const r = media.getBoundingClientRect();
+    if (!r.width || !r.height || !inViewport(r)) return hideReplacePill();
+    pillImg = media;
+    const b = ensureReplacePill();
+    b.style.display = 'block';
+    b.style.left = `${Math.max(6, r.left + 6)}px`;
+    b.style.top = `${Math.max(6, r.top + 6)}px`;
+  }
+
+  function hideReplacePill() {
+    pillImg = null;
+    if (replacePill) replacePill.style.display = 'none';
+  }
+
+  function pickFileFor(img) {
+    if (!filePicker) {
+      filePicker = document.createElement('input');
+      filePicker.type = 'file';
+      filePicker.accept = 'image/*';
+      filePicker.style.display = 'none';
+      document.documentElement.appendChild(filePicker);
+    }
+    filePicker.onchange = () => {
+      const f = filePicker.files[0];
+      filePicker.value = '';
+      if (f) replaceImage(img, f);
+    };
+    filePicker.click();
+  }
+
+  function imgAtPoint(x, y) {
+    const n = document.elementFromPoint(x, y);
+    const t = n && htmlAncestor(n);
+    const media = t && mediaAncestor(t);
+    return media && media.tagName === 'IMG' ? media : null;
+  }
+
+  document.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropImg = imgAtPoint(e.clientX, e.clientY);
+    if (dropImg) {
+      showRing(dropImg, true);
+      e.dataTransfer.dropEffect = 'copy';
+    } else {
+      hideRing();
+    }
+  });
+
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const img = dropImg || imgAtPoint(e.clientX, e.clientY);
+    dropImg = null;
+    hideRing();
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (img && f) replaceImage(img, f);
+  });
+
+  async function replaceImage(img, file) {
+    const dataUri = await encodeImage(file);
+    if (!dataUri) return send({ type: 'wy-error', message: 'unsupported image, or too large after compression' });
+    const picture = img.closest('picture');
+    if (picture) {
+      for (const s of [...picture.querySelectorAll('source')]) s.remove();
+      img.src = dataUri;
+      img.removeAttribute('srcset');
+      img.removeAttribute('sizes');
+      const path = pathOf(picture);
+      if (path) sendOps([{ kind: 'setHTML', path, html: picture.innerHTML }]);
+      return;
+    }
+    const path = pathOf(img);
+    if (!path) return;
+    const ops = [{ kind: 'setAttr', path, name: 'src', value: dataUri }];
+    img.src = dataUri;
+    for (const attr of ['srcset', 'sizes']) {
+      if (img.hasAttribute(attr)) {
+        img.removeAttribute(attr);
+        ops.push({ kind: 'setAttr', path, name: attr, value: null });
+      }
+    }
+    sendOps(ops);
+  }
+
+  function readAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  async function encodeImage(file) {
+    if (!/^image\//.test(file.type)) return null;
+    if (file.type === 'image/svg+xml' || file.size < INLINE_LIMIT) {
+      const uri = await readAsDataUrl(file);
+      return uri.length <= MAX_DATA ? uri : null;
+    }
+    let bmp;
+    try { bmp = await createImageBitmap(file); } catch { return null; }
+    const scale = Math.min(1, MAX_DIM / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bmp.width * scale));
+    canvas.height = Math.max(1, Math.round(bmp.height * scale));
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    let out = canvas.toDataURL('image/webp', 0.85);
+    if (!out.startsWith('data:image/webp')) out = canvas.toDataURL('image/jpeg', 0.85);
+    return out.length <= MAX_DATA ? out : null;
+  }
+
+  function moveTarget(start) {
+    for (let n = start; n && n !== document.body; n = n.parentElement) {
+      const same = [...n.parentElement.children].filter(c => c.tagName === n.tagName);
+      const r = n.getBoundingClientRect();
+      if (same.length >= 2 && r.width && r.height) return n;
+    }
+    return null;
+  }
+
+  function ensureMoveHandle() {
+    if (moveHandle) return moveHandle;
+    moveHandle = document.createElement('button');
+    moveHandle.type = 'button';
+    moveHandle.textContent = '✥';
+    moveHandle.setAttribute('data-wy-handle', '');
+    moveHandle.setAttribute('style', 'position:fixed;z-index:2147483646;display:none;cursor:grab;font:600 12px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;width:22px;height:22px;padding:0;border-radius:6px;border:1px solid;color:#fff;box-shadow:0 2px 10px rgba(15,18,25,.3);touch-action:none');
+    moveHandle.style.background = ACCENT;
+    moveHandle.style.borderColor = ACCENT;
+    moveHandle.addEventListener('pointerenter', () => { if (moveEl) showRing(moveEl, true); });
+    moveHandle.addEventListener('pointerdown', startMove);
+    document.documentElement.appendChild(moveHandle);
+    return moveHandle;
+  }
+
+  function showMoveHandle(el) {
+    if (!el) return hideMoveHandle();
+    const r = el.getBoundingClientRect();
+    if (!inViewport(r)) return hideMoveHandle();
+    moveEl = el;
+    const h = ensureMoveHandle();
+    h.style.display = 'block';
+    h.style.left = `${Math.min(innerWidth - 28, r.right - 28)}px`;
+    h.style.top = `${Math.max(6, r.top + 6)}px`;
+  }
+
+  function hideMoveHandle() {
+    moveEl = null;
+    if (moveHandle) moveHandle.style.display = 'none';
+  }
+
+  function ensureMoveLine() {
+    if (moveLine) return moveLine;
+    moveLine = document.createElement('div');
+    moveLine.setAttribute('style', `position:fixed;pointer-events:none;z-index:2147483645;display:none;border-radius:1px;background:${ACCENT}`);
+    document.documentElement.appendChild(moveLine);
+    return moveLine;
+  }
+
+  function showMoveLine(r, side) {
+    const l = ensureMoveLine();
+    if (side === 'left' || side === 'right') {
+      l.style.width = '3px';
+      l.style.height = `${r.height}px`;
+      l.style.left = `${(side === 'left' ? r.left : r.right) - 1.5}px`;
+      l.style.top = `${r.top}px`;
+    } else {
+      l.style.height = '3px';
+      l.style.width = `${r.width}px`;
+      l.style.top = `${(side === 'top' ? r.top : r.bottom) - 1.5}px`;
+      l.style.left = `${r.left}px`;
+    }
+    l.style.display = 'block';
+  }
+
+  function hideMoveLine() {
+    if (moveLine) moveLine.style.display = 'none';
+  }
+
+  function dropSpot(target, x, y) {
+    const sibs = [...target.parentElement.children].filter(c => c.tagName === target.tagName && c !== target);
+    let best = null;
+    let bestD = Infinity;
+    for (const s of sibs) {
+      const r = s.getBoundingClientRect();
+      const d = (x - r.left - r.width / 2) ** 2 + (y - r.top - r.height / 2) ** 2;
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    if (!best) return null;
+    const r = best.getBoundingClientRect();
+    const dx = (x - r.left - r.width / 2) / (r.width || 1);
+    const dy = (y - r.top - r.height / 2) / (r.height || 1);
+    const row = Math.abs(dx) > Math.abs(dy);
+    const after = row ? dx > 0 : dy > 0;
+    return {
+      ref: after ? best.nextSibling : best,
+      rect: r,
+      side: row ? (after ? 'right' : 'left') : (after ? 'bottom' : 'top'),
+    };
+  }
+
+  function startMove(e) {
+    if (e.button !== 0 || !moveEl) return;
+    e.preventDefault();
+    movingEl = moveEl;
+    moveSpot = null;
+    try { moveHandle.setPointerCapture(e.pointerId); } catch {}
+    moveOrigOpacity = movingEl.style.opacity;
+    movingEl.style.opacity = '0.4';
+    moveHandle.style.cursor = 'grabbing';
+    hideRing();
+    hideReplacePill();
+    moveHandle.addEventListener('pointermove', onMoveDrag);
+    moveHandle.addEventListener('pointerup', endMoveDrag);
+    moveHandle.addEventListener('pointercancel', endMoveDrag);
+  }
+
+  function onMoveDrag(e) {
+    moveSpot = dropSpot(movingEl, e.clientX, e.clientY);
+    if (moveSpot) showMoveLine(moveSpot.rect, moveSpot.side);
+    else hideMoveLine();
+  }
+
+  function endMoveDrag(e) {
+    moveHandle.removeEventListener('pointermove', onMoveDrag);
+    moveHandle.removeEventListener('pointerup', endMoveDrag);
+    moveHandle.removeEventListener('pointercancel', endMoveDrag);
+    const el = movingEl;
+    const spot = e.type === 'pointerup' ? moveSpot : null;
+    movingEl = null;
+    moveSpot = null;
+    hideMoveLine();
+    hideMoveHandle();
+    moveHandle.style.cursor = 'grab';
+    el.style.opacity = moveOrigOpacity;
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+    if (spot) commitMove(el, spot.ref);
+  }
+
+  function commitMove(el, ref) {
+    if (ref === el || ref === el.nextSibling) return;
+    const path = pathOf(el);
+    const before = ref ? pathOf(ref) : null;
+    if (!path || (ref && !before)) return;
+    el.parentNode.insertBefore(el, ref);
+    sendOps([{ kind: 'move', path, before }]);
+  }
 
   document.addEventListener('keydown', (e) => {
     if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z' || editingEl) return;
@@ -330,6 +631,8 @@
   window.addEventListener('scroll', () => {
     if (editingEl) showRing(editingEl, true);
     else hideRing();
+    hideReplacePill();
+    hideMoveHandle();
   }, true);
 
   window.addEventListener('scroll', () => {
@@ -355,6 +658,10 @@
     else if (m.type === 'wy-duplicate') duplicateSlide(m.path);
     else if (m.type === 'wy-scroll-to') scrollToSlide(m.path);
   });
+
+  const placeholderStyle = document.createElement('style');
+  placeholderStyle.textContent = `img[data-wy-placeholder]{outline:2px dashed ${ACCENT};outline-offset:2px}`;
+  document.head.appendChild(placeholderStyle);
 
   scheduleSlides();
 })();

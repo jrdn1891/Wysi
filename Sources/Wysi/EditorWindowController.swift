@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation {
+final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation, WKUIDelegate {
     private static let modeItem = NSToolbarItem.Identifier("mode")
     private static let playItem = NSToolbarItem.Identifier("play")
 
@@ -30,6 +30,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
         config.userContentController.add(bridge, name: "wysi")
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isInspectable = true
+        webView.uiDelegate = self
         window.contentView = webView
         self.webView = webView
 
@@ -81,6 +82,16 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
     @objc private func play(_ sender: Any?) {
         setMode("preview")
         window?.toggleFullScreen(sender)
+    }
+
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        guard let window else { return completionHandler(nil) }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.beginSheetModal(for: window) { response in
+            completionHandler(response == .OK ? panel.urls : nil)
+        }
     }
 
     fileprivate func receive(_ type: String, _ body: [String: Any]) {
