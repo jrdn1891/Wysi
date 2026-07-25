@@ -1,0 +1,107 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: format bar</title>
+<style>
+#results { position: fixed; top: 0; right: 0; z-index: 9999; background: #fff; margin: 0; }
+body { margin: 0; padding: 200px 40px 40px; }
+#stubborn { color: #111111 !important; }
+p { color: #333333; }
+</style>
+<pre id="results">running…</pre>
+<div id="content">
+  <h1 id="head">Heading</h1>
+  <p id="para">Paragraph text.</p>
+  <p id="stubborn">Stubborn text.</p>
+  <div id="empty-zone"></div>
+</div>
+<script>
+const results = [];
+const ops = [];
+
+function check(name, ok, detail) {
+  results.push({ name, ok, ...(detail ? { detail } : {}) });
+}
+function tick() { return new Promise(r => setTimeout(r, 50)); }
+function clickAt(el) {
+  const r = el.getBoundingClientRect();
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+}
+function bar() {
+  return document.querySelector('[data-wy-bar]');
+}
+function barButton(title) {
+  return [...bar().querySelectorAll('button')].find(b => b.title === title);
+}
+function barVisible() {
+  return !!bar() && bar().style.display !== 'none';
+}
+
+addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || typeof m.type !== 'string') return;
+  if (m.type === 'wy-ops') ops.push(...m.ops);
+});
+
+async function run() {
+  await tick();
+  const para = document.getElementById('para');
+  clickAt(para);
+  await tick();
+  check('format bar appears on edit', barVisible());
+
+  ops.length = 0;
+  barButton('bold').click();
+  await tick();
+  check('bold sets inline weight', getComputedStyle(para).fontWeight === '700');
+  const boldOp = ops.find(o => o.kind === 'setAttr' && o.name === 'style');
+  check('bold emits style op', !!boldOp && boldOp.value.includes('font-weight: 700'));
+
+  ops.length = 0;
+  barButton('bold').click();
+  await tick();
+  check('bold toggles back off', getComputedStyle(para).fontWeight === '400');
+  check('empty style attribute removed', ops.some(o => o.name === 'style' && o.value === null) && !para.hasAttribute('style'));
+
+  ops.length = 0;
+  const sizeBefore = parseFloat(getComputedStyle(para).fontSize);
+  barButton('larger').click();
+  await tick();
+  check('size nudge grows the element', parseFloat(getComputedStyle(para).fontSize) > sizeBefore);
+  check('size nudge emits style op', ops.some(o => o.name === 'style' && o.value.includes('font-size')));
+
+  ops.length = 0;
+  barButton('alignment').click();
+  await tick();
+  check('alignment cycles to center', getComputedStyle(para).textAlign === 'center');
+
+  const stubborn = document.getElementById('stubborn');
+  clickAt(stubborn);
+  await tick();
+  ops.length = 0;
+  const colorInput = document.querySelector('input[type=color]');
+  colorInput.value = '#ff0000';
+  colorInput.dispatchEvent(new Event('input', { bubbles: true }));
+  colorInput.dispatchEvent(new Event('change', { bubbles: true }));
+  await tick();
+  check('color beats an !important rule', getComputedStyle(stubborn).color === 'rgb(255, 0, 0)');
+  check('override escalated to !important', (stubborn.getAttribute('style') || '').includes('!important'));
+  check('color emits style op', ops.some(o => o.name === 'style' && o.value.includes('color')));
+
+  clickAt(document.getElementById('empty-zone'));
+  await tick();
+  check('click away hides the bar', !barVisible());
+
+  clickAt(para);
+  await tick();
+  para.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await tick();
+  check('escape hides the bar', !barVisible());
+
+  const pass = results.every(r => r.ok);
+  document.getElementById('results').textContent =
+    'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+  document.title = 'SPIKE-DONE';
+}
+run();
+</script>
+<script src="/Editor/wy-agent.js"></script>

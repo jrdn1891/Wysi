@@ -22,6 +22,15 @@
   let movingEl = null;
   let moveSpot = null;
   let moveOrigOpacity = '';
+  let formatBar = null;
+  let barTarget = null;
+  let barBold = null;
+  let barItalic = null;
+  let barAlign = null;
+  let barColorBtn = null;
+  let barBgBtn = null;
+  let barColorInput = null;
+  let barBgInput = null;
 
   function send(msg) {
     parent.postMessage(msg, '*');
@@ -311,6 +320,7 @@
       }
     }
     showRing(el, true);
+    showFormatBar(el);
   }
 
   function teardownEdit(el) {
@@ -338,6 +348,7 @@
     editingEl = null;
     el.innerHTML = editOrigHtml;
     teardownEdit(el);
+    hideFormatBar();
   }
 
   function plainPaste(e) {
@@ -360,20 +371,29 @@
   document.addEventListener('click', (e) => {
     if (replacePill && replacePill.contains(e.target)) return;
     if (moveHandle && moveHandle.contains(e.target)) return;
+    if (formatBar && formatBar.contains(e.target)) return;
     if (editingEl && editingEl.contains(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
     const start = htmlAncestor(e.target);
-    if (!start || mediaAncestor(start)) return commitEdit();
+    if (!start || mediaAncestor(start)) {
+      hideFormatBar();
+      return commitEdit();
+    }
     const el = editTarget(start);
-    if (el) beginEdit(el, e.clientX, e.clientY);
-    else commitEdit();
+    if (el) {
+      beginEdit(el, e.clientX, e.clientY);
+    } else {
+      hideFormatBar();
+      commitEdit();
+    }
   }, true);
 
   document.addEventListener('pointermove', (e) => {
     if (editingEl || movingEl) return;
     if (replacePill && replacePill.contains(e.target)) return;
     if (moveHandle && moveHandle.contains(e.target)) return;
+    if (formatBar && formatBar.contains(e.target)) return;
     const t = htmlAncestor(e.target);
     if (!t) {
       hideRing();
@@ -630,6 +650,7 @@
     moveHandle.style.cursor = 'grabbing';
     hideRing();
     hideReplacePill();
+    hideFormatBar();
     moveHandle.addEventListener('pointermove', onMoveDrag);
     moveHandle.addEventListener('pointerup', endMoveDrag);
     moveHandle.addEventListener('pointercancel', endMoveDrag);
@@ -666,6 +687,156 @@
     sendOps([{ kind: 'move', path, before }]);
   }
 
+  function setInline(el, prop, value) {
+    const before = getComputedStyle(el).getPropertyValue(prop);
+    el.style.setProperty(prop, value);
+    if (getComputedStyle(el).getPropertyValue(prop) === before) {
+      el.style.setProperty(prop, value, 'important');
+    }
+  }
+
+  function emitStyle(el) {
+    const path = pathOf(el);
+    if (!path) return;
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+    sendOps([{ kind: 'setAttr', path, name: 'style', value: el.getAttribute('style') }]);
+  }
+
+  function toHex(c) {
+    const h = (n) => Math.round(n).toString(16).padStart(2, '0');
+    return `#${h(c.r)}${h(c.g)}${h(c.b)}`;
+  }
+
+  function toggleBold() {
+    const el = barTarget;
+    if (!el) return;
+    const bold = parseInt(getComputedStyle(el).fontWeight, 10) >= 600;
+    if (el.style.fontWeight) el.style.removeProperty('font-weight');
+    else el.style.setProperty('font-weight', bold ? '400' : '700');
+    emitStyle(el);
+    refreshBar();
+  }
+
+  function toggleItalic() {
+    const el = barTarget;
+    if (!el) return;
+    const italic = getComputedStyle(el).fontStyle === 'italic';
+    if (el.style.fontStyle) el.style.removeProperty('font-style');
+    else el.style.setProperty('font-style', italic ? 'normal' : 'italic');
+    emitStyle(el);
+    refreshBar();
+  }
+
+  function nudgeSize(factor) {
+    const el = barTarget;
+    if (!el) return;
+    const size = parseFloat(getComputedStyle(el).fontSize) * factor;
+    setInline(el, 'font-size', `${Math.round(size * 2) / 2}px`);
+    emitStyle(el);
+  }
+
+  const ALIGN_NEXT = { left: 'center', start: 'center', center: 'right', right: 'left', end: 'left', justify: 'left' };
+
+  function cycleAlign() {
+    const el = barTarget;
+    if (!el) return;
+    setInline(el, 'text-align', ALIGN_NEXT[getComputedStyle(el).textAlign] || 'center');
+    emitStyle(el);
+    refreshBar();
+  }
+
+  function makeColorInput(prop) {
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.setAttribute('style', 'position:fixed;left:-9999px;top:0');
+    input.addEventListener('input', () => {
+      if (!barTarget) return;
+      setInline(barTarget, prop, input.value);
+      refreshBar();
+    });
+    input.addEventListener('change', () => {
+      if (!barTarget) return;
+      setInline(barTarget, prop, input.value);
+      emitStyle(barTarget);
+      refreshBar();
+    });
+    document.documentElement.appendChild(input);
+    return input;
+  }
+
+  function pickColor(input, prop) {
+    const el = barTarget;
+    if (!el) return;
+    input.value = toHex(normalizeColor(getComputedStyle(el).getPropertyValue(prop)) || { r: 0, g: 0, b: 0 });
+    input.click();
+  }
+
+  function ensureFormatBar() {
+    if (formatBar) return formatBar;
+    formatBar = document.createElement('div');
+    formatBar.setAttribute('data-wy-bar', '');
+    formatBar.setAttribute('style', 'position:fixed;z-index:2147483646;display:none;gap:2px;padding:3px;border-radius:8px;background:#1c1c20;border:1px solid #3f3f46;box-shadow:0 4px 16px rgba(0,0,0,.35)');
+    const mk = (label, title, action) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.title = title;
+      b.setAttribute('style', 'width:26px;height:24px;padding:0;border:0;border-radius:5px;background:transparent;color:#e4e4e7;font:600 13px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;cursor:pointer');
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        action();
+      });
+      formatBar.appendChild(b);
+      return b;
+    };
+    barBold = mk('B', 'bold', toggleBold);
+    barItalic = mk('I', 'italic', toggleItalic);
+    barItalic.style.fontStyle = 'italic';
+    mk('−', 'smaller', () => nudgeSize(1 / 1.1));
+    mk('+', 'larger', () => nudgeSize(1.1));
+    barAlign = mk('↤', 'alignment', cycleAlign);
+    barColorInput = makeColorInput('color');
+    barBgInput = makeColorInput('background-color');
+    barColorBtn = mk('A', 'text color', () => pickColor(barColorInput, 'color'));
+    barBgBtn = mk('◼', 'background color', () => pickColor(barBgInput, 'background-color'));
+    document.documentElement.appendChild(formatBar);
+    return formatBar;
+  }
+
+  function showFormatBar(el) {
+    barTarget = el;
+    ensureFormatBar().style.display = 'flex';
+    positionFormatBar();
+    refreshBar();
+  }
+
+  function positionFormatBar() {
+    if (!barTarget || !formatBar || formatBar.style.display === 'none') return;
+    const r = barTarget.getBoundingClientRect();
+    const h = formatBar.offsetHeight || 32;
+    const w = formatBar.offsetWidth || 220;
+    const top = r.top - h - 8 >= 4 ? r.top - h - 8 : Math.min(innerHeight - h - 4, r.bottom + 8);
+    formatBar.style.top = `${top}px`;
+    formatBar.style.left = `${Math.max(4, Math.min(innerWidth - w - 4, r.left - 3))}px`;
+  }
+
+  function hideFormatBar() {
+    barTarget = null;
+    if (formatBar) formatBar.style.display = 'none';
+  }
+
+  function refreshBar() {
+    if (!barTarget) return;
+    const cs = getComputedStyle(barTarget);
+    barBold.style.background = parseInt(cs.fontWeight, 10) >= 600 ? '#3f3f46' : 'transparent';
+    barItalic.style.background = cs.fontStyle === 'italic' ? '#3f3f46' : 'transparent';
+    barAlign.textContent = { center: '↔', right: '↦' }[cs.textAlign] || '↤';
+    barColorBtn.style.color = cs.color;
+    barBgBtn.style.color = cs.backgroundColor === 'rgba(0, 0, 0, 0)' ? '#e4e4e7' : cs.backgroundColor;
+  }
+
   document.addEventListener('keydown', (e) => {
     if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z' || editingEl) return;
     e.preventDefault();
@@ -677,7 +848,12 @@
     else hideRing();
     hideReplacePill();
     hideMoveHandle();
+    positionFormatBar();
   }, true);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !editingEl) hideFormatBar();
+  });
 
   window.addEventListener('scroll', () => {
     if (currentPending) return;
