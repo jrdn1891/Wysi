@@ -101,6 +101,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             themePopover?.performClose(nil)
         }
         webView.evaluateJavaScript("wysi.setMode('\(next)')")
+        window?.toolbar?.validateVisibleItems()
     }
 
     @objc private func showTheme(_ sender: NSButton) {
@@ -168,16 +169,18 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
 
     @objc private func undoClicked(_ sender: Any?) {
         wysiDocument?.undoManager?.undo()
+        window?.toolbar?.validateVisibleItems()
     }
 
     @objc private func redoClicked(_ sender: Any?) {
         wysiDocument?.undoManager?.redo()
+        window?.toolbar?.validateVisibleItems()
     }
 
     func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
         switch item.itemIdentifier {
-        case Self.undoItem: return wysiDocument?.undoManager?.canUndo ?? false
-        case Self.redoItem: return wysiDocument?.undoManager?.canRedo ?? false
+        case Self.undoItem: return mode == "edit" && (wysiDocument?.undoManager?.canUndo ?? false)
+        case Self.redoItem: return mode == "edit" && (wysiDocument?.undoManager?.canRedo ?? false)
         default: return true
         }
     }
@@ -221,6 +224,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             webView.evaluateJavaScript("wysi.load(\(json(wysiDocument?.html ?? "")), '\(mode)')")
         case "changed":
             if let html = body["html"] as? String { wysiDocument?.htmlEdited(html) }
+            window?.toolbar?.validateVisibleItems()
         case "flushed":
             let pending = pendingFlush
             pendingFlush = nil

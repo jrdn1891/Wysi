@@ -12,13 +12,15 @@ private enum LibraryScope: String, CaseIterable, Identifiable {
 
 struct LibraryView: View {
     @ObservedObject var store: LibraryStore
+    @ObservedObject var chrome: LibraryChrome
     @AppStorage("libraryViewMode") private var viewMode = "grid"
     @State private var scope: LibraryScope? = .all
-    @State private var filter = ""
     @State private var sortOrder = [KeyPathComparator(\LibraryDoc.modified, order: .reverse)]
     @State private var selection = Set<LibraryDoc.ID>()
     @State private var renaming: LibraryDoc?
     @State private var renameText = ""
+
+    private var filter: String { chrome.search }
 
     private var shown: [LibraryDoc] {
         var docs = store.docs
@@ -38,14 +40,17 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $scope) {
-                ForEach(LibraryScope.allCases) { s in
-                    Label(s.label, systemImage: s.symbol).tag(s)
+        HStack(spacing: 0) {
+            if chrome.sidebarVisible {
+                List(selection: $scope) {
+                    ForEach(LibraryScope.allCases) { s in
+                        Label(s.label, systemImage: s.symbol).tag(s)
+                    }
                 }
+                .listStyle(.sidebar)
+                .frame(width: 180)
+                Divider()
             }
-            .navigationSplitViewColumnWidth(min: 150, ideal: 170)
-        } detail: {
             VStack(spacing: 0) {
                 controls
                 if shown.isEmpty {
@@ -57,6 +62,7 @@ struct LibraryView: View {
                 }
             }
         }
+        .animation(.default, value: chrome.sidebarVisible)
         .frame(minWidth: 780, minHeight: 460)
         .dropDestination(for: URL.self) { urls, _ in
             store.importFiles(urls)
@@ -94,9 +100,6 @@ struct LibraryView: View {
             }
             .fixedSize()
             Spacer()
-            TextField("Search titles and content", text: $filter)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 220)
             Text("^[\(shown.count) document](inflect: true)")
                 .foregroundStyle(.secondary)
         }
