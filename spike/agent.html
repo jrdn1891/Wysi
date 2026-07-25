@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: edit agent</title>
+<pre id="results">running…</pre>
+<div id="content">
+  <h1 id="title">Original heading</h1>
+  <p id="para">Original <strong id="bold">rich</strong> paragraph.</p>
+  <p id="second">Second paragraph.</p>
+</div>
+<script>
+const results = [];
+const ops = [];
+const got = { flushed: false };
+
+function check(name, ok, detail) {
+  results.push({ name, ok, ...(detail ? { detail } : {}) });
+}
+function pathOf(node) {
+  const path = [];
+  for (let n = node; n !== document.body; n = n.parentNode) {
+    path.unshift([...n.parentNode.childNodes].indexOf(n));
+  }
+  return path;
+}
+function tick() { return new Promise(r => setTimeout(r, 50)); }
+function clickAt(el) {
+  const r = el.getBoundingClientRect();
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+}
+
+addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || typeof m.type !== 'string') return;
+  if (m.type === 'wy-ops') ops.push(...m.ops);
+  if (m.type === 'wy-flushed') got.flushed = true;
+});
+
+async function run() {
+  for (let i = 0; i < 40 && !got.flushed; i++) {
+    postMessage({ type: 'wy-flush' }, '*');
+    await tick();
+  }
+  check('agent answers flush handshake', got.flushed);
+  got.flushed = false;
+
+  const para = document.getElementById('para');
+  clickAt(document.getElementById('bold'));
+  await tick();
+  check('click on inline child edits the block ancestor', para.isContentEditable);
+
+  para.textContent = 'Rewritten by human';
+  postMessage({ type: 'wy-flush' }, '*');
+  await tick();
+  check('flush commits the in-flight edit', got.flushed);
+  const textOp = ops.find(o => o.kind === 'setHTML');
+  check('commit emits setHTML op', !!textOp);
+  check('setHTML path resolves to paragraph', !!textOp && JSON.stringify(textOp.path) === JSON.stringify(pathOf(para)));
+  check('setHTML carries new content', !!textOp && textOp.html === 'Rewritten by human');
+  check('contenteditable removed after commit', !para.isContentEditable);
+
+  ops.length = 0;
+  const title = document.getElementById('title');
+  clickAt(title);
+  await tick();
+  title.textContent = 'should be discarded';
+  title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await tick();
+  check('escape restores original text', title.textContent === 'Original heading');
+  check('escape emits no op', ops.length === 0);
+
+  ops.length = 0;
+  const second = document.getElementById('second');
+  clickAt(second);
+  await tick();
+  second.textContent = 'Changed then blurred';
+  second.dispatchEvent(new FocusEvent('focusout'));
+  await tick();
+  const blurOp = ops.find(o => o.kind === 'setHTML');
+  check('focusout commits setHTML op', !!blurOp && blurOp.html === 'Changed then blurred');
+
+  const pass = results.every(r => r.ok);
+  document.getElementById('results').textContent =
+    'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+  document.title = 'SPIKE-DONE';
+}
+run();
+</script>
+<script src="/Editor/wy-agent.js"></script>

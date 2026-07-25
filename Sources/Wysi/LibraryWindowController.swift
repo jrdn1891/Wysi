@@ -1,0 +1,24 @@
+import AppKit
+import SwiftUI
+
+final class LibraryWindowController: NSWindowController {
+    static let shared = LibraryWindowController()
+
+    private init() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: 640),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Library"
+        window.center()
+        window.setFrameAutosaveName("WysiLibrary")
+        window.contentViewController = NSHostingController(rootView: LibraryView(store: .shared))
+        super.init(window: window)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError()
+    }
+}

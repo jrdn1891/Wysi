@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head><title>stress</title><style>body{font:16px sans-serif}</style></head>
+<body>
+<h1>Stress cases</h1>
+<noscript><p>JS is off</p></noscript>
+<template><div>template content</div></template>
+<p>Unclosed paragraph
+<div>div inside p (malformed nesting)</div>
+<table><tr><td>implicit tbody</td></tr></table>
+<ul><li>one<li>two</ul>
+<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="placeholder">
+<button onclick="document.body.appendChild(document.createElement('div'))">inline handler</button>
+<script>document.body.appendChild(Object.assign(document.createElement('div'), { id: 'js-added', textContent: 'added by script' }));</script>
+<p>after the mutating script</p>
+</body>
+</html>

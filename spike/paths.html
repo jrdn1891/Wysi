@@ -1,0 +1,208 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: path alignment</title>
+<pre id="results">running…</pre>
+<div id="frames" style="visibility:hidden;position:absolute;left:-9999px"></div>
+<script type="module">
+function lib() {
+  function nodeFromPath(root, path) {
+    let n = root;
+    for (const i of path) {
+      if (!n || !n.childNodes[i]) return null;
+      n = n.childNodes[i];
+    }
+    return n;
+  }
+  function isSpikeScript(n) {
+    return n.nodeType === 1 && n.tagName === 'SCRIPT' && n.hasAttribute('data-wy-spike');
+  }
+  function signature(body) {
+    const out = [];
+    (function walk(node, path) {
+      let idx = -1;
+      for (const k of node.childNodes) {
+        idx++;
+        if (isSpikeScript(k)) continue;
+        const p = path.concat(idx);
+        if (k.nodeType === 3) {
+          const t = k.data;
+          out.push(p.join('.') + '|#text|' + t.length + ':' + t.slice(0, 40).replace(/\n/g, '\\n'));
+        } else if (k.nodeType === 8) {
+          out.push(p.join('.') + '|#comment|' + k.data.length);
+        } else if (k.nodeType === 1) {
+          const tag = k.tagName;
+          const attrs = tag === 'SCRIPT' ? '' :
+            [...k.attributes].map(a => a.name + '=' + a.value).sort().join(',').slice(0, 120);
+          out.push(p.join('.') + '|' + tag + '|' + attrs);
+          if (tag !== 'TEMPLATE' && tag !== 'NOSCRIPT') walk(k, p);
+        } else {
+          out.push(p.join('.') + '|type' + k.nodeType);
+        }
+      }
+    })(body, []);
+    return out;
+  }
+  function applyOp(body, op) {
+    const n = nodeFromPath(body, op.path);
+    if (!n) return false;
+    if (op.kind === 'setText' && n.nodeType === 3) { n.data = op.text; return true; }
+    if (op.kind === 'setAttr' && n.nodeType === 1) { n.setAttribute(op.name, op.value); return true; }
+    return false;
+  }
+  return { nodeFromPath, signature, applyOp };
+}
+
+const L = lib();
+
+const AGENT = `<script data-wy-spike>
+window.onerror = (msg, src, line) => parent.postMessage({ type: 'spike-error', msg: String(msg), line }, '*');
+try {
+  const L = (${lib})();
+  const announce = () => parent.postMessage({ type: 'spike-sig', sig: L.signature(document.body) }, '*');
+  addEventListener('message', (e) => {
+    const m = e.data;
+    if (!m || m.type !== 'spike-ops') return;
+    const applied = m.ops.map(op => L.applyOp(document.body, op));
+    parent.postMessage({ type: 'spike-sig', applied, sig: L.signature(document.body) }, '*');
+  });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', announce);
+  else announce();
+} catch (e) {
+  parent.postMessage({ type: 'spike-error', msg: String(e) }, '*');
+}
+<\/script>`;
+
+function buildSrcdoc(canonical, { pause }) {
+  const clone = canonical.cloneNode(true);
+  if (pause) for (const s of clone.querySelectorAll('script')) s.setAttribute('type', 'text/wy-paused');
+  return '<!doctype html>' + clone.documentElement.outerHTML + AGENT;
+}
+
+function spawn(srcdoc) {
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('sandbox', 'allow-scripts');
+  iframe.style.cssText = 'width:1000px;height:800px;border:0';
+  const messages = [];
+  let wake = null;
+  addEventListener('message', (e) => {
+    if (e.source !== iframe.contentWindow) return;
+    messages.push(e.data);
+    if (wake) { wake(); wake = null; }
+  });
+  document.getElementById('frames').appendChild(iframe);
+  iframe.srcdoc = srcdoc;
+  return {
+    iframe,
+    async next() {
+      while (!messages.length) await new Promise(r => { wake = r; });
+      return messages.shift();
+    },
+  };
+}
+
+function diff(a, b, limit = 5) {
+  const out = [];
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n && out.length < limit; i++) {
+    if (a[i] !== b[i]) out.push({ i, canonical: a[i] ?? '∅', iframe: b[i] ?? '∅' });
+  }
+  return out;
+}
+
+function pickOps(body) {
+  const texts = [];
+  (function walk(node, path) {
+    let idx = -1;
+    for (const k of node.childNodes) {
+      idx++;
+      const p = path.concat(idx);
+      if (k.nodeType === 3 && k.data.trim().length >= 5 &&
+          !/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(node.tagName || '')) {
+        texts.push(p);
+      } else if (k.nodeType === 1 && k.tagName !== 'TEMPLATE' && k.tagName !== 'NOSCRIPT') {
+        walk(k, p);
+      }
+    }
+  })(body, []);
+  const step = Math.max(1, Math.floor(texts.length / 5));
+  const ops = texts.filter((_, i) => i % step === 0).slice(0, 5)
+    .map((path, i) => ({ kind: 'setText', path, text: `EDITED-${i} by spike` }));
+  const el = body.querySelector('img, a, h1, p');
+  if (el) {
+    const path = [];
+    for (let n = el; n !== body; n = n.parentNode) path.unshift([...n.parentNode.childNodes].indexOf(n));
+    ops.push({ kind: 'setAttr', path, name: 'data-spike', value: '1' });
+  }
+  return ops;
+}
+
+const pre = document.getElementById('results');
+const trace = (m) => { pre.textContent += '\n@ ' + m; };
+
+async function runTarget(name, url, { pause }) {
+  const t0 = performance.now();
+  trace(`${name}: fetching`);
+  const html = await (await fetch(url)).text();
+  const canonical = new DOMParser().parseFromString(html, 'text/html');
+  trace(`${name}: spawning iframe`);
+  const frame = spawn(buildSrcdoc(canonical, { pause }));
+
+  const first = await frame.next();
+  trace(`${name}: first message ${first ? JSON.stringify(first).slice(0, 120) : 'TIMEOUT'}`);
+  if (first && first.type === 'spike-error') return { name, pause, error: first.msg };
+  if (!first) return { name, pause, error: 'timeout waiting for iframe signature' };
+  const canonSig = L.signature(canonical.body);
+  const initialDiffs = diff(canonSig, first.sig);
+  const result = {
+    name, pause,
+    nodes: canonSig.length,
+    initialMatch: initialDiffs.length === 0,
+    initialDiffs,
+  };
+  if (!pause) { frame.iframe.remove(); result.ms = Math.round(performance.now() - t0); return result; }
+
+  const ops = pickOps(canonical.body);
+  trace(`${name}: sending ${ops.length} ops`);
+  frame.iframe.contentWindow.postMessage({ type: 'spike-ops', ops }, '*');
+  const after = await frame.next();
+  trace(`${name}: post-op message ${after ? 'received' : 'TIMEOUT'}`);
+  if (!after) return { ...result, error: 'timeout waiting for post-op signature' };
+  for (const op of ops) L.applyOp(canonical.body, op);
+  const postSig = L.signature(canonical.body);
+  const postDiffs = diff(postSig, after.sig);
+  const serialized = '<!doctype html>' + canonical.documentElement.outerHTML;
+  Object.assign(result, {
+    ops: ops.length,
+    opsAppliedInIframe: after.applied.filter(Boolean).length,
+    postOpsMatch: postDiffs.length === 0,
+    postOpsDiffs: postDiffs,
+    serializedContainsEdits: serialized.includes('EDITED-0') && serialized.includes('data-spike="1"'),
+    ms: Math.round(performance.now() - t0),
+  });
+  frame.iframe.remove();
+  return result;
+}
+
+const TARGETS = [
+  ['demo.html (paused)', '/spike/demo.html', { pause: true }],
+  ['demo.html (live control)', '/spike/demo.html', { pause: false }],
+  ['stress.html (paused)', '/spike/stress.html', { pause: true }],
+  ['stress.html (live control)', '/spike/stress.html', { pause: false }],
+];
+
+const results = [];
+for (const [name, url, opts] of TARGETS) {
+  try { results.push(await runTarget(name, url, opts)); }
+  catch (e) { results.push({ name, error: String(e) }); }
+}
+const byName = Object.fromEntries(results.map(r => [r.name, r]));
+const pausedOk = ['demo.html (paused)', 'stress.html (paused)'].every(n => {
+  const r = byName[n];
+  return r && !r.error && r.initialMatch && r.postOpsMatch && r.serializedContainsEdits;
+});
+const pass = pausedOk
+  && byName['demo.html (live control)']?.initialMatch === true
+  && byName['stress.html (live control)']?.initialMatch === false;
+pre.textContent = 'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+document.title = 'SPIKE-DONE';
+</script>
