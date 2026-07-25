@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: slide ops</title>
+<style>
+#results { position: fixed; top: 0; left: 0; z-index: 9999; background: #fff; margin: 0; }
+body { margin: 0; }
+section { height: 100vh; }
+</style>
+<pre id="results">running…</pre>
+<section><h2>Slide one</h2></section>
+<section><h2>Slide two</h2></section>
+<section><h2>Slide three</h2></section>
+<section><h2>Slide four</h2></section>
+<section><h2>Slide five</h2></section>
+<script>
+const results = [];
+const ops = [];
+let slidesMsg = null;
+let sawCurrent = false;
+
+function check(name, ok, detail) {
+  results.push({ name, ok, ...(detail ? { detail } : {}) });
+}
+function tick() { return new Promise(r => setTimeout(r, 50)); }
+async function until(fn, timeout = 8000) {
+  const deadline = performance.now() + timeout;
+  while (performance.now() < deadline) {
+    const v = fn();
+    if (v) return v;
+    await tick();
+  }
+  return null;
+}
+function h2s() {
+  return [...document.querySelectorAll('section h2')].map(h => h.textContent);
+}
+
+addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || typeof m.type !== 'string') return;
+  if (m.type === 'wy-slides') slidesMsg = m;
+  if (m.type === 'wy-ops') ops.push(...m.ops);
+  if (m.type === 'wy-current') sawCurrent = true;
+});
+
+async function run() {
+  const first = await until(() => slidesMsg && slidesMsg.slides.length === 5 && slidesMsg);
+  check('detects five-slide scroll deck', !!first);
+  check('deck is not stacked', !!first && first.stacked === false);
+  check('current slide reported', sawCurrent);
+
+  let paths = slidesMsg.slides.map(s => s.path);
+  slidesMsg = null;
+  postMessage({ type: 'wy-move', path: paths[0], before: paths[2] }, '*');
+  await until(() => ops.some(o => o.kind === 'move'));
+  check('move emits op', ops.some(o => o.kind === 'move'));
+  check('move reorders the DOM', JSON.stringify(h2s()) === JSON.stringify(['Slide two', 'Slide one', 'Slide three', 'Slide four', 'Slide five']), h2s().join(','));
+
+  await until(() => slidesMsg);
+  paths = slidesMsg.slides.map(s => s.path);
+  slidesMsg = null;
+  ops.length = 0;
+  postMessage({ type: 'wy-remove', path: paths[2] }, '*');
+  await until(() => slidesMsg && slidesMsg.slides.length === 4);
+  check('remove emits op', ops.some(o => o.kind === 'remove'));
+  check('remove deletes the slide', JSON.stringify(h2s()) === JSON.stringify(['Slide two', 'Slide one', 'Slide four', 'Slide five']), h2s().join(','));
+
+  paths = slidesMsg.slides.map(s => s.path);
+  slidesMsg = null;
+  ops.length = 0;
+  postMessage({ type: 'wy-duplicate', path: paths[0] }, '*');
+  await until(() => slidesMsg && slidesMsg.slides.length === 5);
+  check('duplicate emits op', ops.some(o => o.kind === 'duplicate'));
+  check('duplicate clones the slide', JSON.stringify(h2s()) === JSON.stringify(['Slide two', 'Slide two', 'Slide one', 'Slide four', 'Slide five']), h2s().join(','));
+
+  const last = slidesMsg.slides[slidesMsg.slides.length - 1].path;
+  postMessage({ type: 'wy-scroll-to', path: last }, '*');
+  check('scroll-to moves the viewport', !!(await until(() => scrollY > 100)));
+
+  const pass = results.every(r => r.ok);
+  document.getElementById('results').textContent =
+    'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+  document.title = 'SPIKE-DONE';
+}
+run();
+</script>
+<script src="/Editor/wy-agent.js"></script>

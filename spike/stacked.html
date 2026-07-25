@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Stacked deck</title>
+<style>
+body { margin: 0; font: 24px -apple-system, sans-serif; }
+main { position: relative; height: 100vh; overflow: hidden; }
+.slide { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; }
+.slide.active { display: flex; }
+</style>
+</head>
+<body>
+<main>
+<div class="slide active"><h2>Alpha</h2></div>
+<div class="slide"><h2>Beta</h2></div>
+<div class="slide"><h2>Gamma</h2></div>
+<div class="slide"><h2>Delta</h2></div>
+</main>
+<script>
+let i = 0;
+const slides = [...document.querySelectorAll('.slide')];
+addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  slides[i].classList.remove('active');
+  i = (i + (e.key === 'ArrowRight' ? 1 : slides.length - 1)) % slides.length;
+  slides[i].classList.add('active');
+});
+</script>
+</body>
+</html>

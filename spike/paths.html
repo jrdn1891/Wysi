@@ -127,7 +127,7 @@ function pickOps(body) {
   const step = Math.max(1, Math.floor(texts.length / 5));
   const ops = texts.filter((_, i) => i % step === 0).slice(0, 5)
     .map((path, i) => ({ kind: 'setText', path, text: `EDITED-${i} by spike` }));
-  const el = body.querySelector('img, a, h1, p');
+  const el = body.querySelector('img, a, h1, h2, p');
   if (el) {
     const path = [];
     for (let n = el; n !== body; n = n.parentNode) path.unshift([...n.parentNode.childNodes].indexOf(n));
@@ -188,6 +188,8 @@ const TARGETS = [
   ['demo.html (live control)', '/spike/demo.html', { pause: false }],
   ['stress.html (paused)', '/spike/stress.html', { pause: true }],
   ['stress.html (live control)', '/spike/stress.html', { pause: false }],
+  ['deck.html (paused)', '/spike/deck.html', { pause: true }],
+  ['stacked.html (paused)', '/spike/stacked.html', { pause: true }],
 ];
 
 const results = [];
@@ -196,7 +198,7 @@ for (const [name, url, opts] of TARGETS) {
   catch (e) { results.push({ name, error: String(e) }); }
 }
 const byName = Object.fromEntries(results.map(r => [r.name, r]));
-const pausedOk = ['demo.html (paused)', 'stress.html (paused)'].every(n => {
+const pausedOk = ['demo.html (paused)', 'stress.html (paused)', 'deck.html (paused)', 'stacked.html (paused)'].every(n => {
   const r = byName[n];
   return r && !r.error && r.initialMatch && r.postOpsMatch && r.serializedContainsEdits;
 });

@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: stacked deck</title>
+<style>
+#results { position: fixed; top: 0; left: 0; z-index: 9999; background: #fff; margin: 0; }
+body { margin: 0; }
+main { position: relative; height: 100vh; overflow: hidden; }
+.slide { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; }
+.slide.active { display: flex; }
+</style>
+<pre id="results">running…</pre>
+<main>
+<div class="slide active"><h2>Alpha</h2></div>
+<div class="slide"><h2>Beta</h2></div>
+<div class="slide"><h2>Gamma</h2></div>
+<div class="slide"><h2>Delta</h2></div>
+</main>
+<script>
+const results = [];
+let slidesMsg = null;
+
+function check(name, ok, detail) {
+  results.push({ name, ok, ...(detail ? { detail } : {}) });
+}
+function tick() { return new Promise(r => setTimeout(r, 50)); }
+async function until(fn, timeout = 8000) {
+  const deadline = performance.now() + timeout;
+  while (performance.now() < deadline) {
+    const v = fn();
+    if (v) return v;
+    await tick();
+  }
+  return null;
+}
+
+addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || typeof m.type !== 'string') return;
+  if (m.type === 'wy-slides') slidesMsg = m;
+});
+
+async function run() {
+  const first = await until(() => slidesMsg && slidesMsg.slides.length === 4 && slidesMsg);
+  check('detects four-slide stacked deck', !!first);
+  check('deck is stacked', !!first && first.stacked === true);
+  check('captures the visible display', !!first && first.display === 'flex');
+  check('slides have geometry after linearize', !!first && first.slides.every(s => s.height > 0));
+
+  const slides = [...document.querySelectorAll('.slide')];
+  check('linearize forces slides visible', slides.every(s => getComputedStyle(s).display === 'flex'));
+  check('linearize unstacks positioning', slides.every(s => getComputedStyle(s).position === 'relative'));
+  check('linearize opens host overflow', getComputedStyle(document.querySelector('main')).overflow === 'visible');
+
+  slidesMsg = null;
+  postMessage({ type: 'wy-remove', path: first.slides[1].path }, '*');
+  await until(() => slidesMsg && slidesMsg.slides.length === 3);
+  check('remove works on stacked deck', document.querySelectorAll('.slide').length === 3);
+
+  const pass = results.every(r => r.ok);
+  document.getElementById('results').textContent =
+    'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+  document.title = 'SPIKE-DONE';
+}
+run();
+</script>
+<script src="/Editor/wy-agent.js"></script>

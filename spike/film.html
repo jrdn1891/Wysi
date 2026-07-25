@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: filmstrip</title>
+<pre id="results">running…</pre>
+<iframe id="editor" src="/Editor/editor.html" style="width:900px;height:700px;border:0"></iframe>
+<script type="module">
+const results = [];
+const events = [];
+const frame = document.getElementById('editor');
+
+const DECK = '<!doctype html><html><head><title>deck</title><style>body{margin:0}section{height:100vh}</style></head><body>' +
+  ['one', 'two', 'three', 'four', 'five'].map(t => `<section><h2>Slide ${t}</h2></section>`).join('') +
+  '</body></html>';
+const PLAIN = '<!doctype html><html><head></head><body><p>plain page</p></body></html>';
+
+function check(name, ok, detail) {
+  results.push({ name, ok, ...(detail ? { detail } : {}) });
+}
+function tick() { return new Promise(r => setTimeout(r, 50)); }
+async function until(fn, timeout = 8000) {
+  const deadline = performance.now() + timeout;
+  while (performance.now() < deadline) {
+    const v = fn();
+    if (v) return v;
+    await tick();
+  }
+  return null;
+}
+const doc = () => frame.contentDocument;
+const cells = () => doc().querySelectorAll('.wy-e-slide');
+
+const win = await until(() => frame.contentWindow?.wysi && frame.contentWindow);
+check('editor session booted', !!win);
+win.addEventListener('wysi-notify', (e) => events.push(e.detail));
+
+win.wysi.load(DECK, 'edit');
+check('filmstrip shows five cells', !!(await until(() => cells().length === 5)));
+const thumb = doc().querySelector('.wy-e-thumb');
+check('thumbnails are shifted snapshots', !!thumb && (thumb.dataset.doc || '').includes('translateY'));
+
+events.length = 0;
+doc().querySelectorAll('.wy-e-slide-x')[1].click();
+check('delete removes a cell', !!(await until(() => cells().length === 4)));
+const removed = await until(() => events.find(m => m.type === 'changed' && !m.html.includes('Slide two')));
+check('delete updates the document', !!removed);
+
+events.length = 0;
+doc().querySelector('.wy-e-plus').click();
+check('plus duplicates a cell', !!(await until(() => cells().length === 5)));
+const dupe = events.find(m => m.type === 'changed');
+check('duplicate lands in the document', !!dupe && (dupe.html.match(/Slide one/g) || []).length === 2);
+
+win.wysi.load(PLAIN, 'edit');
+await until(() => doc().querySelector('.wy-e-film')?.hidden === true);
+check('non-deck hides the filmstrip', doc().querySelector('.wy-e-film')?.hidden === true);
+
+const pass = results.every(r => r.ok);
+document.getElementById('results').textContent =
+  'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+document.title = 'SPIKE-DONE';
+</script>

@@ -26,9 +26,159 @@
     return n === document.body ? path : null;
   }
 
+  function nodeFromPath(path) {
+    let n = document.body;
+    for (const i of path) {
+      if (!n || !n.childNodes[i]) return null;
+      n = n.childNodes[i];
+    }
+    return n;
+  }
+
   function sendOps(ops) {
     const valid = ops.filter(o => o.path);
     if (valid.length) send({ type: 'wy-ops', ops: valid });
+    scheduleSlides();
+  }
+
+  const SLIDE_SKIP = new Set(['SCRIPT', 'STYLE', 'LINK', 'TEMPLATE']);
+  let slideDeck = null;
+  let slidesTimer = null;
+  let currentSent = -1;
+  let currentPending = false;
+
+  function slideKids(el) {
+    return [...el.children].filter(c => !SLIDE_SKIP.has(c.tagName));
+  }
+
+  function slideGroup(el) {
+    const byTag = new Map();
+    for (const k of slideKids(el)) {
+      if (!byTag.has(k.tagName)) byTag.set(k.tagName, []);
+      byTag.get(k.tagName).push(k);
+    }
+    let best = [];
+    for (const g of byTag.values()) if (g.length > best.length) best = g;
+    return best.length >= 3 ? best : null;
+  }
+
+  function fillsViewport(el) {
+    return el.getBoundingClientRect().height >= innerHeight * 0.7;
+  }
+
+  function detectDeck() {
+    const queue = [document.body];
+    while (queue.length) {
+      const el = queue.shift();
+      const group = slideGroup(el);
+      if (group) {
+        const tag = group[0].tagName;
+        if (group.filter(fillsViewport).length >= group.length - 1) {
+          return { host: el, tag, stacked: false };
+        }
+        const shown = group.filter(k => getComputedStyle(k).display !== 'none');
+        if (group.length - shown.length >= group.length - 1
+            && group.every(k => getComputedStyle(k).position === 'absolute')
+            && (shown.length ? shown.every(fillsViewport) : fillsViewport(el))) {
+          const cs = shown.length ? getComputedStyle(shown[0]) : null;
+          return {
+            host: el,
+            tag,
+            stacked: true,
+            display: cs ? cs.display : 'block',
+            flexDirection: cs ? cs.flexDirection : 'row',
+          };
+        }
+      }
+      queue.push(...slideKids(el));
+    }
+    return null;
+  }
+
+  function linearize(slides) {
+    for (const s of slides) {
+      s.style.setProperty('display', slideDeck.display, 'important');
+      s.style.setProperty('flex-direction', slideDeck.flexDirection, 'important');
+      s.style.setProperty('position', 'relative', 'important');
+      s.style.setProperty('inset', 'auto', 'important');
+      s.style.setProperty('height', '100vh', 'important');
+    }
+    for (let n = slideDeck.host; n; n = n.parentElement) {
+      n.style.setProperty('overflow', 'visible', 'important');
+      n.style.setProperty('height', 'auto', 'important');
+    }
+  }
+
+  function deckMembers() {
+    return slideKids(slideDeck.host).filter(k => k.tagName === slideDeck.tag);
+  }
+
+  function emitSlides() {
+    if (!slideDeck || !slideDeck.host.isConnected) slideDeck = detectDeck();
+    if (!slideDeck) return send({ type: 'wy-slides', slides: [] });
+    const members = deckMembers();
+    if (slideDeck.stacked) linearize(members);
+    const slides = members.map(el => {
+      const r = el.getBoundingClientRect();
+      return { path: pathOf(el), top: r.top + scrollY, height: r.height };
+    }).filter(s => s.path && s.height > 0);
+    send({
+      type: 'wy-slides',
+      stacked: slideDeck.stacked,
+      display: slideDeck.display,
+      flexDirection: slideDeck.flexDirection,
+      slides,
+    });
+    currentSent = -1;
+    emitCurrent();
+  }
+
+  function emitCurrent() {
+    if (!slideDeck) return;
+    const mid = innerHeight / 2;
+    let cur = -1;
+    let best = Infinity;
+    deckMembers().forEach((el, i) => {
+      const r = el.getBoundingClientRect();
+      const d = Math.abs((r.top + r.bottom) / 2 - mid);
+      if (d < best) { best = d; cur = i; }
+    });
+    if (cur === currentSent) return;
+    currentSent = cur;
+    send({ type: 'wy-current', index: cur });
+  }
+
+  function scheduleSlides() {
+    clearTimeout(slidesTimer);
+    slidesTimer = setTimeout(emitSlides, 200);
+  }
+
+  function removeSlide(path) {
+    const el = nodeFromPath(path);
+    if (!el || el.nodeType !== 1) return;
+    el.remove();
+    sendOps([{ kind: 'remove', path }]);
+  }
+
+  function moveSlide(path, before) {
+    const el = nodeFromPath(path);
+    if (!el || el.nodeType !== 1) return;
+    const ref = before ? nodeFromPath(before) : null;
+    if (before && !ref) return;
+    el.parentNode.insertBefore(el, ref);
+    sendOps([{ kind: 'move', path, before }]);
+  }
+
+  function duplicateSlide(path) {
+    const el = nodeFromPath(path);
+    if (!el || el.nodeType !== 1) return;
+    el.parentNode.insertBefore(el.cloneNode(true), el.nextSibling);
+    sendOps([{ kind: 'duplicate', path }]);
+  }
+
+  function scrollToSlide(path) {
+    const el = nodeFromPath(path);
+    if (el && el.nodeType === 1) el.scrollIntoView({ block: 'center' });
   }
 
   function htmlAncestor(node) {
@@ -182,12 +332,29 @@
     else hideRing();
   }, true);
 
+  window.addEventListener('scroll', () => {
+    if (currentPending) return;
+    currentPending = true;
+    requestAnimationFrame(() => {
+      currentPending = false;
+      emitCurrent();
+    });
+  }, true);
+
+  window.addEventListener('resize', scheduleSlides);
+  window.addEventListener('load', scheduleSlides);
+
   window.addEventListener('message', (e) => {
     const m = e.data;
     if (!m || typeof m !== 'object') return;
     if (m.type === 'wy-flush') {
       commitEdit();
       send({ type: 'wy-flushed' });
-    }
+    } else if (m.type === 'wy-remove') removeSlide(m.path);
+    else if (m.type === 'wy-move') moveSlide(m.path, m.before);
+    else if (m.type === 'wy-duplicate') duplicateSlide(m.path);
+    else if (m.type === 'wy-scroll-to') scrollToSlide(m.path);
   });
+
+  scheduleSlides();
 })();

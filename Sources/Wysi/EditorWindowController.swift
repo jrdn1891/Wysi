@@ -3,6 +3,7 @@ import WebKit
 
 final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation {
     private static let modeItem = NSToolbarItem.Identifier("mode")
+    private static let playItem = NSToolbarItem.Identifier("play")
 
     private var webView: WKWebView!
     private var modeControl: NSSegmentedControl?
@@ -20,6 +21,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             defer: false
         )
         window.center()
+        window.collectionBehavior.insert(.fullScreenPrimary)
         self.init(window: window)
         bridge.controller = self
 
@@ -76,6 +78,11 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
         setMode(sender.selectedSegment == 1 ? "edit" : "preview")
     }
 
+    @objc private func play(_ sender: Any?) {
+        setMode("preview")
+        window?.toggleFullScreen(sender)
+    }
+
     fileprivate func receive(_ type: String, _ body: [String: Any]) {
         switch type {
         case "ready":
@@ -102,21 +109,33 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        guard itemIdentifier == Self.modeItem else { return nil }
-        let control = NSSegmentedControl(labels: ["Preview", "Edit"], trackingMode: .selectOne, target: self, action: #selector(segmentChanged(_:)))
-        control.selectedSegment = 0
-        modeControl = control
-        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        item.view = control
-        return item
+        switch itemIdentifier {
+        case Self.modeItem:
+            let control = NSSegmentedControl(labels: ["Preview", "Edit"], trackingMode: .selectOne, target: self, action: #selector(segmentChanged(_:)))
+            control.selectedSegment = 0
+            modeControl = control
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.view = control
+            return item
+        case Self.playItem:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Play"
+            item.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Play")
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(play(_:))
+            return item
+        default:
+            return nil
+        }
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.modeItem, .flexibleSpace]
+        [.flexibleSpace, Self.modeItem, .flexibleSpace, Self.playItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.modeItem]
+        [.flexibleSpace, Self.modeItem, Self.playItem]
     }
 }
 

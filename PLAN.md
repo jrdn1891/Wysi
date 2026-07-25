@@ -97,9 +97,9 @@ Undo lives in `NSUndoManager` as full-document string snapshots (quickhost's mod
 - *Text*: hover shows the dashed ring; click places the caret and edits in place. Plain text only, Enter commits, Esc restores.
 - *Images*: hover pill "replace" opens the picker; dropping an image file from Finder onto any `<img>` replaces it. Placeholder images (`<img data-wy-placeholder>`) get a persistent dashed outline — we publish this convention for generating agents, as quickhost does in `llms.txt`.
 - *Element move* (new): repeated units — an element whose parent contains ≥2 same-tag siblings: cards, list items, sections — show a grab cursor on their edge ring; pointer-drag reorders among siblings with quickhost's drop-line indicators. Same-parent only in v1; cross-parent drops produce layout chaos for no real use case.
-- *Filmstrip* (appears in Edit mode when a deck is detected; collapsible): drag to reorder, hover `×` to delete, right-click → Duplicate / Delete, a `+` at the strip end duplicates the current slide as the fast "one more slide" path. Click scrolls to the slide; current slide tracks scroll.
+- *Filmstrip* (appears in Edit mode when a deck is detected): drag to reorder, hover `×` / `⧉` to delete or duplicate, a `+` at the strip end duplicates the current slide as the fast "one more slide" path. Click scrolls to the slide; current slide tracks scroll.
 
-**Slide insert/duplicate** (new op): the agent clones the slide element and emits `insert {path, html}`; canonical replay creates the node at the path. Clones keep their markup verbatim — agent slide markup is uniform, which is exactly why cloning works.
+**Slide duplicate** (new op): `duplicate {path}` — the live DOM and the canonical document each clone their own node at the path and insert it after itself. No HTML payload round-trip, so the copy is byte-identical by construction.
 
 **Keyboard**: Cmd-S save now, Cmd-Z/Shift-Cmd-Z undo/redo, Cmd-E edit/preview, Esc cancel or exit edit, Enter commit text, Cmd-D duplicate current slide, Delete removes selected filmstrip slide, arrows navigate filmstrip.
 
