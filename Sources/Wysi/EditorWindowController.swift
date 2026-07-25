@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 
-final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation, WKUIDelegate, NSSharingServicePickerToolbarItemDelegate, NSPopoverDelegate {
+final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToolbarItemValidation, NSMenuItemValidation, WKUIDelegate, NSSharingServicePickerToolbarItemDelegate, NSPopoverDelegate {
     private static let modeItem = NSToolbarItem.Identifier("mode")
     private static let playItem = NSToolbarItem.Identifier("play")
     private static let undoItem = NSToolbarItem.Identifier("undo")
@@ -101,6 +101,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             themePopover?.performClose(nil)
         }
         webView.evaluateJavaScript("wysi.setMode('\(next)')")
+        updateUndoRedoItems()
         window?.toolbar?.validateVisibleItems()
     }
 
@@ -179,9 +180,23 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
 
     func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
         switch item.itemIdentifier {
-        case Self.undoItem: return mode == "edit" && (wysiDocument?.undoManager?.canUndo ?? false)
-        case Self.redoItem: return mode == "edit" && (wysiDocument?.undoManager?.canRedo ?? false)
+        case Self.undoItem: return wysiDocument?.undoManager?.canUndo ?? false
+        case Self.redoItem: return wysiDocument?.undoManager?.canRedo ?? false
         default: return true
+        }
+    }
+
+    private func updateUndoRedoItems() {
+        guard let toolbar = window?.toolbar else { return }
+        let present = toolbar.items.contains { $0.itemIdentifier == Self.undoItem }
+        if mode == "edit" && !present {
+            toolbar.insertItem(withItemIdentifier: Self.undoItem, at: 0)
+            toolbar.insertItem(withItemIdentifier: Self.redoItem, at: 1)
+        } else if mode != "edit" && present {
+            for (index, item) in toolbar.items.enumerated().reversed()
+            where item.itemIdentifier == Self.undoItem || item.itemIdentifier == Self.redoItem {
+                toolbar.removeItem(at: index)
+            }
         }
     }
 
@@ -313,7 +328,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.undoItem, Self.redoItem, .flexibleSpace, Self.modeItem, .flexibleSpace, Self.themeItem, Self.shareItem, Self.playItem]
+        [.flexibleSpace, Self.modeItem, .flexibleSpace, Self.themeItem, Self.shareItem, Self.playItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
