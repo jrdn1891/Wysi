@@ -190,6 +190,7 @@ const TARGETS = [
   ['stress.html (live control)', '/spike/stress.html', { pause: false }],
   ['deck.html (paused)', '/spike/deck.html', { pause: true }],
   ['stacked.html (paused)', '/spike/stacked.html', { pause: true }],
+  ['overlay.html (paused)', '/spike/overlay.html', { pause: true }],
 ];
 
 const results = [];
@@ -198,7 +199,7 @@ for (const [name, url, opts] of TARGETS) {
   catch (e) { results.push({ name, error: String(e) }); }
 }
 const byName = Object.fromEntries(results.map(r => [r.name, r]));
-const pausedOk = ['demo.html (paused)', 'stress.html (paused)', 'deck.html (paused)', 'stacked.html (paused)'].every(n => {
+const pausedOk = ['demo.html (paused)', 'stress.html (paused)', 'deck.html (paused)', 'stacked.html (paused)', 'overlay.html (paused)'].every(n => {
   const r = byName[n];
   return r && !r.error && r.initialMatch && r.postOpsMatch && r.serializedContainsEdits;
 });

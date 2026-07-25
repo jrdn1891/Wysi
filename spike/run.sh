@@ -7,7 +7,7 @@ trap 'kill $server 2>/dev/null' EXIT
 sleep 1
 chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 fail=0
-for page in paths agent slides stacked-slides film; do
+for page in paths agent slides stacked-slides overlay-slides film; do
   out=$("$chrome" --headless=new --disable-gpu --dump-dom --virtual-time-budget=30000 \
     --disable-features=IsolateSandboxedIframes \
     --host-resolver-rules="MAP * 127.0.0.1, EXCLUDE localhost" \

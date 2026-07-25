@@ -13,6 +13,7 @@ final class LibraryWindowController: NSWindowController {
         )
         window.title = "Library"
         window.center()
+        window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("WysiLibrary")
         window.contentViewController = NSHostingController(rootView: LibraryView(store: .shared))
         super.init(window: window)

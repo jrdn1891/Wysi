@@ -26,14 +26,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LibraryWindowController.shared.showWindow(nil)
     }
 
+    @objc func showSettings(_ sender: Any?) {
+        SettingsWindowController.shared.showWindow(nil)
+    }
+
     @objc func importToLibrary(_ sender: Any?) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.html]
         panel.allowsMultipleSelection = true
         panel.begin { response in
             guard response == .OK else { return }
-            LibraryStore.shared.importFiles(panel.urls)
-            LibraryWindowController.shared.showWindow(nil)
+            Task { @MainActor in
+                LibraryStore.shared.importFiles(panel.urls)
+                LibraryWindowController.shared.showWindow(nil)
+            }
         }
     }
 
@@ -42,6 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About WYSI", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide WYSI", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Quit WYSI", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

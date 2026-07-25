@@ -23,7 +23,7 @@ The hard problems are already solved in `/Users/gabriel/Documents/GitHub/quickho
 | `pathOf` / `nodeFromPath` child-index addressing | `doc-agent.js:27-46` | Port as-is |
 | contenteditable `plaintext-only`, plain paste, Esc-cancels / Enter-commits, `editTarget` block→inline→text cascade | `doc-agent.js:424-425, 625-726` | Port as-is |
 | Image replace: `<picture>` flattening, `srcset` removal, bitmap→canvas→WebP→data URI | `doc-agent.js:837-888` | Port as-is |
-| Slide detection: dominant same-tag child group ≥3, scroll-shaped vs stacked, `linearize()` | `doc-agent.js:464-535` | Port as-is |
+| Slide detection: dominant same-tag child group ≥3, scroll-shaped vs stacked, `linearize()` | `doc-agent.js:464-535` | Ported; extended — stacked decks may hide slides via `opacity`/`visibility` (not just `display:none`), and linearize unpins `position:fixed` wrapper ancestors so the page scrolls |
 | Filmstrip: live full-width iframes CSS-scaled down, `dataset.doc` memoization | `editor.js:190-269` | Port as-is |
 | Pointer-based drag reorder (4px threshold, midpoint targeting, edge auto-scroll, click suppression) | `editor.js:161-245` | Port; also reuse for element move |
 | Palette sampling from the document for adaptive chrome | `comments.js:167-274` | Port for editor HUD colors |
@@ -72,7 +72,7 @@ Undo lives in `NSUndoManager` as full-document string snapshots (quickhost's mod
 
 - `WysiDocument` (NSDocument, UTType `public.html`, role Editor): free autosave-in-place, window restoration, titlebar rename, Duplicate, Revert, `NSFileVersion` history later.
 - Saves are atomic writes of the canonical string. Nothing else — no diffing, no versioning of our own.
-- **External-change watching is a first-class feature**, because the other editor of these files is an agent. `DispatchSource` on the open file: clean document → reload silently, preserving scroll; dirty document → banner "Changed on disk — Reload / Keep mine". This makes WYSI a live preview for Claude Code sessions writing the same file.
+- **External-change watching is a first-class feature**, because the other editor of these files is an agent. `NSFilePresenter` on the open document: clean document → silent revert-from-disk (scroll resets — the same accepted loss as undo); dirty document → sheet "Changed on disk — Reload From Disk / Keep My Edits". This makes WYSI a live preview for Claude Code sessions writing the same file.
 
 ### Serving the document
 
@@ -81,7 +81,7 @@ Undo lives in `NSUndoManager` as full-document string snapshots (quickhost's mod
 ## The library
 
 - One folder, default `~/Documents/WYSI`, user-relocatable (security-scoped bookmark). Files in it are plain `.html`, fully visible and usable in Finder — "managed" means WYSI watches and displays the folder, not that files are hidden in an opaque bundle.
-- Library window: thumbnail grid, sorted by modified date, filename filter field. Card shows snapshot, `<title>` (falls back to filename), modified date, slide-count badge when a deck is detected.
+- Library window: sidebar (All Files / Favorites) beside a thumbnail grid or sortable list view (toggle persists). Filter field, sort by modified/title/filename. Cards show a live thumbnail, `<title>` (falls back to filename), modified date, and a star badge; favorites are stored as a Finder tag ("Favorite") on the file itself, so they survive moves and show in Finder.
 - Thumbnails: live scaled-down `WKWebView`s (magnification ~0.25), one per visible card, lazily mounted by the grid — quickhost's workspace-card pattern. No snapshot cache to invalidate; FSEvents on the folder reloads cards live as agents write files.
 - Card actions: open, inline rename, Duplicate, Move to Trash, Reveal in Finder, drag-out (real file drag), Share (`NSSharingServicePicker`).
 - Import: drag files into the window or Dock icon, or File → Import — copies into the library.
@@ -101,7 +101,7 @@ Undo lives in `NSUndoManager` as full-document string snapshots (quickhost's mod
 
 **Slide duplicate** (new op): `duplicate {path}` — the live DOM and the canonical document each clone their own node at the path and insert it after itself. No HTML payload round-trip, so the copy is byte-identical by construction.
 
-**Keyboard**: Cmd-S save now, Cmd-Z/Shift-Cmd-Z undo/redo, Cmd-E edit/preview, Esc cancel or exit edit, Enter commit text, Cmd-D duplicate current slide, Delete removes selected filmstrip slide, arrows navigate filmstrip.
+**Keyboard**: Cmd-S save now, Cmd-Z/Shift-Cmd-Z undo/redo, Cmd-E edit/preview, Esc cancel or exit edit, Enter commit text. In Edit mode arrows/PageUp/PageDown/Space page through the document — slide-by-slide when a deck is detected.
 
 ## Milestones — each with its verification check
 

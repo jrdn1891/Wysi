@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const ACCENT = '#0a84ff';
+  let ACCENT = '#0a84ff';
   const MEDIA = new Set(['IMG', 'SVG', 'VIDEO', 'PICTURE', 'CANVAS', 'IFRAME']);
   const EDIT_BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH', 'DT', 'DD', 'BLOCKQUOTE', 'FIGCAPTION', 'CAPTION', 'PRE', 'SUMMARY']);
   const EDIT_INLINE = new Set(['A', 'BUTTON', 'LABEL', 'SPAN', 'CODE', 'EM', 'STRONG', 'SMALL', 'TIME', 'B', 'I']);
@@ -79,6 +79,11 @@
     return el.getBoundingClientRect().height >= innerHeight * 0.7;
   }
 
+  function hiddenish(el) {
+    const cs = getComputedStyle(el);
+    return cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.05;
+  }
+
   function detectDeck() {
     const queue = [document.body];
     while (queue.length) {
@@ -86,21 +91,21 @@
       const group = slideGroup(el);
       if (group) {
         const tag = group[0].tagName;
-        if (group.filter(fillsViewport).length >= group.length - 1) {
+        if (group.every(k => getComputedStyle(k).position === 'absolute')) {
+          const shown = group.filter(k => !hiddenish(k));
+          if (group.length - shown.length >= group.length - 1
+              && (shown.length ? shown.every(fillsViewport) : fillsViewport(el))) {
+            const cs = shown.length ? getComputedStyle(shown[0]) : null;
+            return {
+              host: el,
+              tag,
+              stacked: true,
+              display: cs ? cs.display : 'block',
+              flexDirection: cs ? cs.flexDirection : 'row',
+            };
+          }
+        } else if (group.filter(fillsViewport).length >= group.length - 1) {
           return { host: el, tag, stacked: false };
-        }
-        const shown = group.filter(k => getComputedStyle(k).display !== 'none');
-        if (group.length - shown.length >= group.length - 1
-            && group.every(k => getComputedStyle(k).position === 'absolute')
-            && (shown.length ? shown.every(fillsViewport) : fillsViewport(el))) {
-          const cs = shown.length ? getComputedStyle(shown[0]) : null;
-          return {
-            host: el,
-            tag,
-            stacked: true,
-            display: cs ? cs.display : 'block',
-            flexDirection: cs ? cs.flexDirection : 'row',
-          };
         }
       }
       queue.push(...slideKids(el));
@@ -115,10 +120,13 @@
       s.style.setProperty('position', 'relative', 'important');
       s.style.setProperty('inset', 'auto', 'important');
       s.style.setProperty('height', '100vh', 'important');
+      s.style.setProperty('opacity', '1', 'important');
+      s.style.setProperty('visibility', 'visible', 'important');
     }
     for (let n = slideDeck.host; n; n = n.parentElement) {
       n.style.setProperty('overflow', 'visible', 'important');
       n.style.setProperty('height', 'auto', 'important');
+      if (getComputedStyle(n).position === 'fixed') n.style.setProperty('position', 'static', 'important');
     }
   }
 
@@ -140,6 +148,7 @@
       stacked: slideDeck.stacked,
       display: slideDeck.display,
       flexDirection: slideDeck.flexDirection,
+      accent: ACCENT,
       slides,
     });
     currentSent = -1;
@@ -193,6 +202,36 @@
     const el = nodeFromPath(path);
     if (el && el.nodeType === 1) el.scrollIntoView({ block: 'center' });
   }
+
+  function stepSlide(delta) {
+    const members = deckMembers();
+    if (!members.length) return false;
+    const mid = innerHeight / 2;
+    let cur = 0;
+    let best = Infinity;
+    members.forEach((el, i) => {
+      const r = el.getBoundingClientRect();
+      const d = Math.abs((r.top + r.bottom) / 2 - mid);
+      if (d < best) { best = d; cur = i; }
+    });
+    members[Math.min(members.length - 1, Math.max(0, cur + delta))]
+      .scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return true;
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (editingEl || e.metaKey || e.ctrlKey || e.altKey) return;
+    const fwd = e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ';
+    const back = e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'PageUp';
+    if (!fwd && !back) return;
+    e.preventDefault();
+    if (slideDeck && slideDeck.host.isConnected && stepSlide(fwd ? 1 : -1)) return;
+    scrollBy({ top: (fwd ? 1 : -1) * innerHeight * 0.85, behavior: 'smooth' });
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') commitEdit();
+  });
 
   function htmlAncestor(node) {
     let n = node && node.nodeType === 1 ? node : node && node.parentElement;
@@ -357,8 +396,6 @@
     replacePill.type = 'button';
     replacePill.textContent = '↺ replace';
     replacePill.setAttribute('style', 'position:fixed;z-index:2147483646;display:none;cursor:pointer;font:600 12px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;letter-spacing:.03em;padding:.34rem .55rem;border-radius:6px;border:1px solid;color:#fff;box-shadow:0 2px 10px rgba(15,18,25,.3)');
-    replacePill.style.background = ACCENT;
-    replacePill.style.borderColor = ACCENT;
     replacePill.addEventListener('mousedown', (e) => e.preventDefault());
     replacePill.addEventListener('click', (e) => {
       e.preventDefault();
@@ -379,6 +416,8 @@
     if (!r.width || !r.height || !inViewport(r)) return hideReplacePill();
     pillImg = media;
     const b = ensureReplacePill();
+    b.style.background = ACCENT;
+    b.style.borderColor = ACCENT;
     b.style.display = 'block';
     b.style.left = `${Math.max(6, r.left + 6)}px`;
     b.style.top = `${Math.max(6, r.top + 6)}px`;
@@ -501,8 +540,6 @@
     moveHandle.textContent = '✥';
     moveHandle.setAttribute('data-wy-handle', '');
     moveHandle.setAttribute('style', 'position:fixed;z-index:2147483646;display:none;cursor:grab;font:600 12px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;width:22px;height:22px;padding:0;border-radius:6px;border:1px solid;color:#fff;box-shadow:0 2px 10px rgba(15,18,25,.3);touch-action:none');
-    moveHandle.style.background = ACCENT;
-    moveHandle.style.borderColor = ACCENT;
     moveHandle.addEventListener('pointerenter', () => { if (moveEl) showRing(moveEl, true); });
     moveHandle.addEventListener('pointerdown', startMove);
     document.documentElement.appendChild(moveHandle);
@@ -515,6 +552,8 @@
     if (!inViewport(r)) return hideMoveHandle();
     moveEl = el;
     const h = ensureMoveHandle();
+    h.style.background = ACCENT;
+    h.style.borderColor = ACCENT;
     h.style.display = 'block';
     h.style.left = `${Math.min(innerWidth - 28, r.right - 28)}px`;
     h.style.top = `${Math.max(6, r.top + 6)}px`;
@@ -528,13 +567,14 @@
   function ensureMoveLine() {
     if (moveLine) return moveLine;
     moveLine = document.createElement('div');
-    moveLine.setAttribute('style', `position:fixed;pointer-events:none;z-index:2147483645;display:none;border-radius:1px;background:${ACCENT}`);
+    moveLine.setAttribute('style', 'position:fixed;pointer-events:none;z-index:2147483645;display:none;border-radius:1px');
     document.documentElement.appendChild(moveLine);
     return moveLine;
   }
 
   function showMoveLine(r, side) {
     const l = ensureMoveLine();
+    l.style.background = ACCENT;
     if (side === 'left' || side === 'right') {
       l.style.width = '3px';
       l.style.height = `${r.height}px`;
@@ -660,8 +700,34 @@
   });
 
   const placeholderStyle = document.createElement('style');
-  placeholderStyle.textContent = `img[data-wy-placeholder]{outline:2px dashed ${ACCENT};outline-offset:2px}`;
   document.head.appendChild(placeholderStyle);
 
+  function luma(color) {
+    const m = color.match(/\d+(\.\d+)?/g);
+    if (!m || m.length < 3) return null;
+    return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+  }
+
+  function sampleAccent() {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta && meta.content) return meta.content;
+    const bgLuma = luma(getComputedStyle(document.body).backgroundColor) ?? 1;
+    for (const sel of ['a[href]', 'h1', 'h2', 'strong']) {
+      const el = document.querySelector(sel);
+      if (!el) continue;
+      const c = getComputedStyle(el).color;
+      const l = luma(c);
+      if (l !== null && Math.abs(l - bgLuma) > 0.2) return c;
+    }
+    return '#0a84ff';
+  }
+
+  function applyAccent() {
+    ACCENT = sampleAccent();
+    placeholderStyle.textContent = `img[data-wy-placeholder]{outline:2px dashed ${ACCENT};outline-offset:2px}`;
+  }
+
+  applyAccent();
+  window.addEventListener('load', applyAccent);
   scheduleSlides();
 })();

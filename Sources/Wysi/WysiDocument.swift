@@ -21,6 +21,7 @@ body { font: 18px/1.6 -apple-system, sans-serif; max-width: 40rem; margin: 4rem 
 final class WysiDocument: NSDocument {
     var html = starterHTML
     weak var editor: EditorWindowController?
+    private var conflictAlert: NSAlert?
 
     override class var autosavesInPlace: Bool { true }
 
@@ -45,11 +46,43 @@ final class WysiDocument: NSDocument {
     }
 
     override func save(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType, completionHandler: @escaping (Error?) -> Void) {
-        guard let editor else {
+        guard saveOperation == .saveOperation, let editor else {
             return super.save(to: url, ofType: typeName, for: saveOperation, completionHandler: completionHandler)
         }
         editor.flush {
             super.save(to: url, ofType: typeName, for: saveOperation, completionHandler: completionHandler)
+        }
+    }
+
+    override nonisolated func presentedItemDidChange() {
+        DispatchQueue.main.async { [weak self] in self?.checkExternalChange() }
+    }
+
+    func checkExternalChange() {
+        guard let url = fileURL,
+              let diskDate = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
+              let known = fileModificationDate,
+              diskDate > known
+        else { return }
+        if !isDocumentEdited {
+            try? revert(toContentsOf: url, ofType: fileType ?? "public.html")
+            return
+        }
+        guard conflictAlert == nil, let window = windowForSheet else { return }
+        let alert = NSAlert()
+        alert.messageText = "“\(displayName ?? "Document")” changed on disk"
+        alert.informativeText = "Another app rewrote this file while you have unsaved edits."
+        alert.addButton(withTitle: "Reload From Disk")
+        alert.addButton(withTitle: "Keep My Edits")
+        conflictAlert = alert
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            self.conflictAlert = nil
+            if response == .alertFirstButtonReturn {
+                try? self.revert(toContentsOf: url, ofType: self.fileType ?? "public.html")
+            } else {
+                self.fileModificationDate = diskDate
+            }
         }
     }
 

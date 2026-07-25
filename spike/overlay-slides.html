@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: overlay deck</title>
+<style>
+#results { position: fixed; top: 0; left: 0; z-index: 9999; background: #fff; margin: 0; }
+body { margin: 0; overflow: hidden; }
+.pillnav { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; gap: 4px; }
+#stage { position: fixed; inset: 0; }
+.deck { position: relative; width: 100vw; height: 100vh; }
+.slide { position: absolute; inset: 0; opacity: 0; visibility: hidden; display: flex; align-items: center; justify-content: center; }
+.slide.active { opacity: 1; visibility: visible; }
+</style>
+<pre id="results">running…</pre>
+<div class="pillnav">
+<button>One</button>
+<button>Two</button>
+<button>Three</button>
+<button>Four</button>
+</div>
+<div id="stage"><div class="deck">
+<section class="slide active"><h2>Frame one</h2></section>
+<section class="slide"><h2>Frame two</h2></section>
+<section class="slide"><h2>Frame three</h2></section>
+<section class="slide"><h2>Frame four</h2></section>
+</div></div>
+<script>
+const results = [];
+let slidesMsg = null;
+
+function check(name, ok, detail) {
+  results.push({ name, ok, ...(detail ? { detail } : {}) });
+}
+function tick() { return new Promise(r => setTimeout(r, 50)); }
+async function until(fn, timeout = 8000) {
+  const deadline = performance.now() + timeout;
+  while (performance.now() < deadline) {
+    const v = fn();
+    if (v) return v;
+    await tick();
+  }
+  return null;
+}
+
+addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || typeof m.type !== 'string') return;
+  if (m.type === 'wy-slides') slidesMsg = m;
+});
+
+async function run() {
+  const first = await until(() => slidesMsg && slidesMsg.slides.length === 4 && slidesMsg);
+  check('detects opacity-hidden stacked deck', !!first);
+  check('deck is stacked', !!first && first.stacked === true);
+  check('captures display from the active slide', !!first && first.display === 'flex');
+  check('slides have distinct positions after linearize', !!first && new Set(first.slides.map(s => Math.round(s.top))).size === 4);
+
+  const slides = [...document.querySelectorAll('.slide')];
+  check('linearize forces slides opaque', slides.every(s => getComputedStyle(s).opacity === '1'));
+  check('linearize forces slides visible', slides.every(s => getComputedStyle(s).visibility === 'visible'));
+  check('fixed stage unpinned so the page scrolls', document.documentElement.scrollHeight > innerHeight);
+
+  slidesMsg = null;
+  postMessage({ type: 'wy-remove', path: first.slides[1].path }, '*');
+  await until(() => slidesMsg && slidesMsg.slides.length === 3);
+  check('remove works on overlay deck', document.querySelectorAll('.slide').length === 3);
+
+  const pass = results.every(r => r.ok);
+  document.getElementById('results').textContent =
+    'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+  document.title = 'SPIKE-DONE';
+}
+run();
+</script>
+<script src="/Editor/wy-agent.js"></script>

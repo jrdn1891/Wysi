@@ -1,65 +1,188 @@
 import SwiftUI
 import WebKit
 
+private enum LibraryScope: String, CaseIterable, Identifiable {
+    case all
+    case favorites
+
+    var id: String { rawValue }
+    var label: String { self == .all ? "All Files" : "Favorites" }
+    var symbol: String { self == .all ? "tray.full" : "star" }
+}
+
 struct LibraryView: View {
     @ObservedObject var store: LibraryStore
+    @AppStorage("libraryViewMode") private var viewMode = "grid"
+    @State private var scope: LibraryScope? = .all
     @State private var filter = ""
+    @State private var sortOrder = [KeyPathComparator(\LibraryDoc.modified, order: .reverse)]
+    @State private var selection = Set<LibraryDoc.ID>()
     @State private var renaming: LibraryDoc?
     @State private var renameText = ""
 
     private var shown: [LibraryDoc] {
-        guard !filter.isEmpty else { return store.docs }
-        return store.docs.filter {
-            $0.title.localizedCaseInsensitiveContains(filter) ||
-            $0.url.lastPathComponent.localizedCaseInsensitiveContains(filter)
+        var docs = store.docs
+        if scope == .favorites { docs = docs.filter(\.favorite) }
+        if !filter.isEmpty {
+            docs = docs.filter {
+                $0.title.localizedCaseInsensitiveContains(filter) ||
+                $0.filename.localizedCaseInsensitiveContains(filter)
+            }
         }
+        return docs.sorted(using: sortOrder)
     }
 
     var body: some View {
-        Group {
-            if store.docs.isEmpty {
-                emptyState
-            } else {
-                grid
+        NavigationSplitView {
+            List(selection: $scope) {
+                ForEach(LibraryScope.allCases) { s in
+                    Label(s.label, systemImage: s.symbol).tag(s)
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 150, ideal: 170)
+        } detail: {
+            VStack(spacing: 0) {
+                controls
+                if shown.isEmpty {
+                    emptyState
+                } else if viewMode == "grid" {
+                    grid
+                } else {
+                    table
+                }
             }
         }
-        .frame(minWidth: 640, minHeight: 420)
+        .frame(minWidth: 780, minHeight: 460)
         .dropDestination(for: URL.self) { urls, _ in
             store.importFiles(urls)
             return true
         }
+        .alert("Rename", isPresented: renamePresented) {
+            TextField("Name", text: $renameText)
+            Button("Rename") {
+                if let renaming { store.rename(renaming, to: renameText) }
+                renaming = nil
+            }
+            Button("Cancel", role: .cancel) { renaming = nil }
+        }
+    }
+
+    private var renamePresented: Binding<Bool> {
+        Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
+    }
+
+    private var controls: some View {
+        HStack(spacing: 12) {
+            Picker("View", selection: $viewMode) {
+                Image(systemName: "square.grid.2x2").tag("grid")
+                Image(systemName: "list.bullet").tag("list")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            Menu {
+                Button("Date Modified") { sortOrder = [KeyPathComparator(\LibraryDoc.modified, order: .reverse)] }
+                Button("Title") { sortOrder = [KeyPathComparator(\LibraryDoc.title)] }
+                Button("File Name") { sortOrder = [KeyPathComparator(\LibraryDoc.filename)] }
+            } label: {
+                Label("Sort", systemImage: "arrow.up.arrow.down")
+            }
+            .fixedSize()
+            Spacer()
+            TextField("Filter", text: $filter)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 200)
+            Text("^[\(shown.count) document](inflect: true)")
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
     }
 
     private var grid: some View {
-        VStack(spacing: 0) {
-            HStack {
-                TextField("Filter", text: $filter)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 220)
-                Spacer()
-                Text("^[\(shown.count) document](inflect: true)")
-                    .foregroundStyle(.secondary)
-            }
-            .padding(12)
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16)], spacing: 16) {
-                    ForEach(shown) { doc in
-                        DocCard(doc: doc, store: store, renaming: $renaming, renameText: $renameText)
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16)], spacing: 16) {
+                ForEach(shown) { doc in
+                    DocCard(doc: doc, open: { open(doc) }) {
+                        menuItems(for: [doc])
                     }
                 }
-                .padding(16)
+            }
+            .padding(16)
+        }
+    }
+
+    private var table: some View {
+        Table(shown, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("") { doc in
+                Button { store.toggleFavorite(doc) } label: {
+                    Image(systemName: doc.favorite ? "star.fill" : "star")
+                        .foregroundStyle(doc.favorite ? AnyShapeStyle(.yellow) : AnyShapeStyle(.secondary))
+                }
+                .buttonStyle(.plain)
+            }
+            .width(24)
+            TableColumn("Title", value: \.title)
+            TableColumn("File", value: \.filename)
+            TableColumn("Modified", value: \.modified) { doc in
+                Text(doc.modified, format: .relative(presentation: .named))
             }
         }
+        .contextMenu(forSelectionType: LibraryDoc.ID.self) { ids in
+            menuItems(for: docs(for: ids))
+        } primaryAction: { ids in
+            for doc in docs(for: ids) { open(doc) }
+        }
+    }
+
+    private func docs(for ids: Set<LibraryDoc.ID>) -> [LibraryDoc] {
+        store.docs.filter { ids.contains($0.id) }
+    }
+
+    private func open(_ doc: LibraryDoc) {
+        NSDocumentController.shared.openDocument(withContentsOf: doc.url, display: true) { _, _, _ in }
+    }
+
+    @ViewBuilder
+    private func menuItems(for docs: [LibraryDoc]) -> some View {
+        if docs.count == 1, let doc = docs.first {
+            Button { open(doc) } label: { Label("Open", systemImage: "arrow.up.forward.app") }
+            Button {
+                renameText = doc.url.deletingPathExtension().lastPathComponent
+                renaming = doc
+            } label: { Label("Rename…", systemImage: "pencil") }
+        }
+        Button {
+            for doc in docs { store.toggleFavorite(doc) }
+        } label: {
+            if docs.allSatisfy(\.favorite) {
+                Label("Unfavorite", systemImage: "star.slash")
+            } else {
+                Label("Favorite", systemImage: "star")
+            }
+        }
+        Button {
+            for doc in docs { store.duplicate(doc) }
+        } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+        Divider()
+        if docs.count == 1, let doc = docs.first {
+            ShareLink(item: doc.url) { Label("Share…", systemImage: "square.and.arrow.up") }
+        }
+        Button {
+            NSWorkspace.shared.activateFileViewerSelecting(docs.map(\.url))
+        } label: { Label("Reveal in Finder", systemImage: "folder") }
+        Button(role: .destructive) {
+            for doc in docs { store.trash(doc) }
+        } label: { Label("Move to Trash", systemImage: "trash") }
     }
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Image(systemName: "tray.and.arrow.down")
+            Image(systemName: scope == .favorites ? "star" : "tray.and.arrow.down")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            Text("Drop HTML files here")
+            Text(scope == .favorites ? "No favorites yet" : "Drop HTML files here")
                 .font(.title3)
-            Text(store.folder.path)
+            Text(scope == .favorites ? "Right-click any file and choose Favorite." : store.folder.path)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -67,11 +190,16 @@ struct LibraryView: View {
     }
 }
 
-private struct DocCard: View {
+private struct DocCard<Menu: View>: View {
     let doc: LibraryDoc
-    let store: LibraryStore
-    @Binding var renaming: LibraryDoc?
-    @Binding var renameText: String
+    let open: () -> Void
+    let menu: () -> Menu
+
+    init(doc: LibraryDoc, open: @escaping () -> Void, @ViewBuilder menu: @escaping () -> Menu) {
+        self.doc = doc
+        self.open = open
+        self.menu = menu
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -80,41 +208,31 @@ private struct DocCard: View {
                 .allowsHitTesting(false)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
-            if renaming == doc {
-                TextField("", text: $renameText)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        store.rename(doc, to: renameText)
-                        renaming = nil
+                .overlay(alignment: .topTrailing) {
+                    if doc.favorite {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .padding(6)
+                            .shadow(radius: 2)
                     }
-                    .onExitCommand { renaming = nil }
-            } else {
-                Text(doc.title)
-                    .lineLimit(1)
-            }
+                }
+            Text(doc.title)
+                .lineLimit(1)
             Text(doc.modified, format: .relative(presentation: .named))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { open() }
-        .contextMenu {
-            Button("Open") { open() }
-            Button("Rename") {
-                renameText = doc.url.deletingPathExtension().lastPathComponent
-                renaming = doc
-            }
-            Button("Duplicate") { store.duplicate(doc) }
-            Divider()
-            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([doc.url]) }
-            Button("Move to Trash", role: .destructive) { store.trash(doc) }
-        }
+        .onTapGesture(count: 2, perform: open)
+        .contextMenu { menu() }
         .onDrag { NSItemProvider(contentsOf: doc.url) ?? NSItemProvider() }
     }
+}
 
-    private func open() {
-        NSDocumentController.shared.openDocument(withContentsOf: doc.url, display: true) { _, _, _ in }
-    }
+private final class InertWebView: WKWebView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override var acceptsFirstResponder: Bool { false }
+    override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
 }
 
 private struct DocThumbnail: NSViewRepresentable {
@@ -124,7 +242,7 @@ private struct DocThumbnail: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> WKWebView {
-        WKWebView()
+        InertWebView()
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {

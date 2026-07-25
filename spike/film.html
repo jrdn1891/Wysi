@@ -8,7 +8,7 @@ const results = [];
 const events = [];
 const frame = document.getElementById('editor');
 
-const DECK = '<!doctype html><html><head><title>deck</title><style>body{margin:0}section{height:100vh}</style></head><body>' +
+const DECK = '<!doctype html><html><head><title>deck</title><meta name="theme-color" content="#ff2d55"><style>body{margin:0}section{height:100vh}</style></head><body>' +
   ['one', 'two', 'three', 'four', 'five'].map(t => `<section><h2>Slide ${t}</h2></section>`).join('') +
   '</body></html>';
 const PLAIN = '<!doctype html><html><head></head><body><p>plain page</p></body></html>';
@@ -37,6 +37,7 @@ win.wysi.load(DECK, 'edit');
 check('filmstrip shows five cells', !!(await until(() => cells().length === 5)));
 const thumb = doc().querySelector('.wy-e-thumb');
 check('thumbnails are shifted snapshots', !!thumb && (thumb.dataset.doc || '').includes('translateY'));
+check('filmstrip adopts the document accent', doc().querySelector('.wy-e-film').style.getPropertyValue('--wy-accent').trim() === '#ff2d55');
 
 events.length = 0;
 doc().querySelectorAll('.wy-e-slide-x')[1].click();

@@ -4,7 +4,9 @@ struct LibraryDoc: Identifiable, Hashable {
     let url: URL
     let title: String
     let modified: Date
+    let favorite: Bool
     var id: URL { url }
+    var filename: String { url.lastPathComponent }
 }
 
 final class FolderWatcher {
@@ -47,15 +49,29 @@ final class FolderWatcher {
 @MainActor
 final class LibraryStore: ObservableObject {
     static let shared = LibraryStore(
-        folder: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("WYSI")
+        folder: UserDefaults.standard.url(forKey: "libraryFolder")
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("WYSI")
     )
 
-    let folder: URL
+    @Published private(set) var folder: URL
     @Published private(set) var docs: [LibraryDoc] = []
     private var watcher: FolderWatcher?
 
     init(folder: URL) {
         self.folder = folder
+        watch()
+    }
+
+    func relocate(to url: URL) {
+        folder = url
+        watch()
+    }
+
+    func contains(_ url: URL) -> Bool {
+        url.resolvingSymlinksInPath().path.hasPrefix(folder.resolvingSymlinksInPath().path + "/")
+    }
+
+    private func watch() {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         watcher = FolderWatcher(folder: folder) { [weak self] in
             Task { @MainActor in self?.rescan() }
@@ -66,16 +82,29 @@ final class LibraryStore: ObservableObject {
     func rescan() {
         let urls = (try? FileManager.default.contentsOfDirectory(
             at: folder,
-            includingPropertiesForKeys: [.contentModificationDateKey],
+            includingPropertiesForKeys: [.contentModificationDateKey, .tagNamesKey],
             options: [.skipsHiddenFiles]
         )) ?? []
         docs = urls
             .filter { ["html", "htm"].contains($0.pathExtension.lowercased()) }
             .map { url in
-                let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return LibraryDoc(url: url, title: Self.title(of: url), modified: mtime)
+                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .tagNamesKey])
+                return LibraryDoc(
+                    url: url,
+                    title: Self.title(of: url),
+                    modified: values?.contentModificationDate ?? .distantPast,
+                    favorite: values?.tagNames?.contains("Favorite") ?? false
+                )
             }
             .sorted { $0.modified > $1.modified }
+    }
+
+    func toggleFavorite(_ doc: LibraryDoc) {
+        let ns = doc.url as NSURL
+        var tags = ((try? ns.resourceValues(forKeys: [.tagNamesKey])[.tagNamesKey]) as? [String]) ?? []
+        if let i = tags.firstIndex(of: "Favorite") { tags.remove(at: i) } else { tags.append("Favorite") }
+        try? ns.setResourceValue(tags as NSArray, forKey: .tagNamesKey)
+        rescan()
     }
 
     static func title(of url: URL) -> String {
@@ -90,11 +119,17 @@ final class LibraryStore: ObservableObject {
         return url.deletingPathExtension().lastPathComponent
     }
 
-    func importFiles(_ urls: [URL]) {
-        for src in urls where ["html", "htm"].contains(src.pathExtension.lowercased()) {
-            try? FileManager.default.copyItem(at: src, to: freeSlot(for: src.lastPathComponent))
-        }
+    @discardableResult
+    func importFile(_ src: URL) -> URL? {
+        guard ["html", "htm"].contains(src.pathExtension.lowercased()) else { return nil }
+        let dest = freeSlot(for: src.lastPathComponent)
+        do { try FileManager.default.copyItem(at: src, to: dest) } catch { return nil }
         rescan()
+        return dest
+    }
+
+    func importFiles(_ urls: [URL]) {
+        for src in urls { importFile(src) }
     }
 
     func duplicate(_ doc: LibraryDoc) {

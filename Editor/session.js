@@ -1,7 +1,7 @@
-const ACCENT = '#0a84ff';
 const FILM_W = 168;
 
 const iframe = document.getElementById('doc');
+iframe.addEventListener('load', () => iframe.focus());
 const native = window.webkit?.messageHandlers?.wysi;
 
 let canonical = null;
@@ -149,6 +149,8 @@ function slideDoc(paths, i, display, flexDirection) {
     if (j === i) {
       n.style.setProperty('display', display, 'important');
       n.style.setProperty('flex-direction', flexDirection, 'important');
+      n.style.setProperty('opacity', '1', 'important');
+      n.style.setProperty('visibility', 'visible', 'important');
     } else {
       n.style.setProperty('display', 'none', 'important');
     }
@@ -156,7 +158,7 @@ function slideDoc(paths, i, display, flexDirection) {
   return '<!doctype html>' + clone.documentElement.outerHTML;
 }
 
-function showFilm({ slides, stacked, display, flexDirection }) {
+function showFilm({ slides, stacked, display, flexDirection, accent }) {
   if (!filmEl) {
     injectFilmStyles();
     filmEl = document.createElement('div');
@@ -175,6 +177,7 @@ function showFilm({ slides, stacked, display, flexDirection }) {
     document.body.appendChild(filmEl);
   }
   filmEl.hidden = false;
+  if (accent) filmEl.style.setProperty('--wy-accent', accent);
   iframe.style.marginLeft = `${FILM_W}px`;
   iframe.style.width = `calc(100% - ${FILM_W}px)`;
   const mainW = iframe.getBoundingClientRect().width;
@@ -271,20 +274,20 @@ function injectFilmStyles() {
 .wy-e-film{position:fixed;top:0;left:0;bottom:0;width:${FILM_W}px;box-sizing:border-box;z-index:100;background:#0a0a0a;border-right:1px solid #3f3f46;overflow-y:auto;padding:10px 9px;user-select:none;-webkit-user-select:none}
 .wy-e-thumb{display:block;border:0;background:#fff;transform-origin:0 0;pointer-events:none}
 .wy-e-slide{position:relative;overflow:hidden;margin-bottom:8px;cursor:pointer;border:1px solid #3f3f46;border-radius:3px;background:#fff}
-.wy-e-slide:hover{border-color:${ACCENT}}
+.wy-e-slide:hover{border-color:var(--wy-accent, #0a84ff)}
 .wy-e-slide-n{position:absolute;left:4px;bottom:3px;font:10px/1.4 ui-sans-serif,system-ui,-apple-system,sans-serif;color:#e4e4e7;background:rgba(10,10,10,.65);padding:0 4px;border-radius:3px}
 .wy-e-slide-x,.wy-e-slide-d{position:absolute;top:3px;display:none;width:18px;height:18px;padding:0;background:#0a0a0a;color:#e4e4e7;border:1px solid #3f3f46;border-radius:3px;font:12px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;cursor:pointer}
 .wy-e-slide-x{right:3px}
 .wy-e-slide-d{right:24px}
 .wy-e-slide:hover .wy-e-slide-x,.wy-e-slide:hover .wy-e-slide-d{display:block}
-.wy-e-slide-x:hover,.wy-e-slide-d:hover{background:${ACCENT};border-color:${ACCENT};color:#fff}
-.wy-e-slide.wy-e-cur{border-color:${ACCENT};box-shadow:0 0 0 1px ${ACCENT}}
-.wy-e-slide.wy-e-cur .wy-e-slide-n{background:${ACCENT};color:#fff}
+.wy-e-slide-x:hover,.wy-e-slide-d:hover{background:var(--wy-accent, #0a84ff);border-color:var(--wy-accent, #0a84ff);color:#fff}
+.wy-e-slide.wy-e-cur{border-color:var(--wy-accent, #0a84ff);box-shadow:0 0 0 1px var(--wy-accent, #0a84ff)}
+.wy-e-slide.wy-e-cur .wy-e-slide-n{background:var(--wy-accent, #0a84ff);color:#fff}
 .wy-e-slide.wy-e-drag{opacity:.4;cursor:grabbing}
-.wy-e-slide.wy-e-drop-before{box-shadow:0 -5px 0 -2px ${ACCENT}}
-.wy-e-slide.wy-e-drop-after{box-shadow:0 5px 0 -2px ${ACCENT}}
+.wy-e-slide.wy-e-drop-before{box-shadow:0 -5px 0 -2px var(--wy-accent, #0a84ff)}
+.wy-e-slide.wy-e-drop-after{box-shadow:0 5px 0 -2px var(--wy-accent, #0a84ff)}
 .wy-e-plus{width:100%;padding:.4rem 0;margin:2px 0 12px;background:#0a0a0a;color:#e4e4e7;border:1px dashed #3f3f46;border-radius:3px;font:16px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;cursor:pointer}
-.wy-e-plus:hover{border-color:${ACCENT};color:#fff}
+.wy-e-plus:hover{border-color:var(--wy-accent, #0a84ff);color:#fff}
 `;
   document.head.appendChild(style);
 }

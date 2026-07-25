@@ -1,9 +1,11 @@
 import AppKit
 import WebKit
 
-final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation, WKUIDelegate {
+final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation, WKUIDelegate, NSSharingServicePickerToolbarItemDelegate {
     private static let modeItem = NSToolbarItem.Identifier("mode")
     private static let playItem = NSToolbarItem.Identifier("play")
+    private static let shareItem = NSToolbarItem.Identifier("share")
+    private static let addLibraryItem = NSToolbarItem.Identifier("addLibrary")
 
     private var webView: WKWebView!
     private var modeControl: NSSegmentedControl?
@@ -13,6 +15,16 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
 
     private var wysiDocument: WysiDocument? { document as? WysiDocument }
 
+    override var document: AnyObject? {
+        didSet {
+            guard let url = wysiDocument?.fileURL, !LibraryStore.shared.contains(url),
+                  let toolbar = window?.toolbar,
+                  !toolbar.items.contains(where: { $0.itemIdentifier == Self.addLibraryItem })
+            else { return }
+            toolbar.insertItem(withItemIdentifier: Self.addLibraryItem, at: 0)
+        }
+    }
+
     convenience init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
@@ -21,6 +33,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             defer: false
         )
         window.center()
+        window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.fullScreenPrimary)
         self.init(window: window)
         bridge.controller = self
@@ -84,6 +97,20 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
         window?.toggleFullScreen(sender)
     }
 
+    @objc private func addToLibrary(_ sender: Any?) {
+        guard let doc = wysiDocument, let url = doc.fileURL else { return }
+        doc.save(to: url, ofType: doc.fileType ?? "public.html", for: .saveOperation) { _ in
+            guard let dest = LibraryStore.shared.importFile(url) else { return }
+            NSDocumentController.shared.openDocument(withContentsOf: dest, display: true) { _, _, _ in
+                doc.close()
+            }
+        }
+    }
+
+    func items(for pickerToolbarItem: NSSharingServicePickerToolbarItem) -> [Any] {
+        [wysiDocument?.fileURL].compactMap { $0 }
+    }
+
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
         guard let window else { return completionHandler(nil) }
         let panel = NSOpenPanel()
@@ -122,7 +149,12 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch itemIdentifier {
         case Self.modeItem:
-            let control = NSSegmentedControl(labels: ["Preview", "Edit"], trackingMode: .selectOne, target: self, action: #selector(segmentChanged(_:)))
+            let control = NSSegmentedControl(images: [
+                NSImage(systemSymbolName: "eye", accessibilityDescription: "Preview")!,
+                NSImage(systemSymbolName: "pencil", accessibilityDescription: "Edit")!,
+            ], trackingMode: .selectOne, target: self, action: #selector(segmentChanged(_:)))
+            control.setToolTip("Preview", forSegment: 0)
+            control.setToolTip("Edit", forSegment: 1)
             control.selectedSegment = 0
             modeControl = control
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
@@ -136,17 +168,29 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             item.target = self
             item.action = #selector(play(_:))
             return item
+        case Self.shareItem:
+            let item = NSSharingServicePickerToolbarItem(itemIdentifier: itemIdentifier)
+            item.delegate = self
+            return item
+        case Self.addLibraryItem:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Add to Library"
+            item.image = NSImage(systemSymbolName: "plus.rectangle.on.folder", accessibilityDescription: "Add to Library")
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(addToLibrary(_:))
+            return item
         default:
             return nil
         }
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.modeItem, .flexibleSpace, Self.playItem]
+        [.flexibleSpace, Self.modeItem, .flexibleSpace, Self.shareItem, Self.playItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.modeItem, Self.playItem]
+        [.flexibleSpace, Self.modeItem, Self.playItem, Self.shareItem, Self.addLibraryItem]
     }
 }
 

@@ -58,6 +58,37 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(store.docs.map(\.url.lastPathComponent), ["final.html"])
     }
 
+    func testRelocate() throws {
+        try write("a.html", "<html><body></body></html>")
+        store.rescan()
+        XCTAssertEqual(store.docs.count, 1)
+
+        let other = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wysi-tests-b-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: other) }
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        try Data("<html><head><title>B</title></head><body></body></html>".utf8)
+            .write(to: other.appendingPathComponent("b.html"))
+
+        store.relocate(to: other)
+
+        XCTAssertEqual(store.docs.map(\.title), ["B"])
+        XCTAssertTrue(store.contains(other.appendingPathComponent("b.html")))
+        XCTAssertFalse(store.contains(folder.appendingPathComponent("a.html")))
+    }
+
+    func testFavoriteToggle() throws {
+        try write("f.html", "<html><body></body></html>")
+        store.rescan()
+        XCTAssertFalse(store.docs[0].favorite)
+
+        store.toggleFavorite(store.docs[0])
+        XCTAssertTrue(store.docs[0].favorite)
+
+        store.toggleFavorite(store.docs[0])
+        XCTAssertFalse(store.docs[0].favorite)
+    }
+
     func testWatcherPicksUpExternalWrites() async throws {
         XCTAssertEqual(store.docs.count, 0)
         try write("agent-output.html", "<html><head><title>From an agent</title></head><body></body></html>")

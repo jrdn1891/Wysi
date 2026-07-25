@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Overlay deck</title>
+<style>
+body { margin: 0; font: 24px -apple-system, sans-serif; background: #000; overflow: hidden; }
+.pillnav { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; gap: 4px; }
+#stage { position: fixed; inset: 0; }
+.deck { position: relative; width: 100vw; height: 100vh; }
+.slide { position: absolute; inset: 0; opacity: 0; visibility: hidden; transition: opacity .4s ease; display: flex; align-items: center; justify-content: center; background: #f7f6f4; }
+.slide.active { opacity: 1; visibility: visible; }
+</style>
+</head>
+<body>
+<div class="pillnav">
+<button data-go="0">One</button>
+<button data-go="1">Two</button>
+<button data-go="2">Three</button>
+<button data-go="3">Four</button>
+</div>
+<div id="stage"><div class="deck">
+<section class="slide active"><h2>Frame one</h2></section>
+<section class="slide"><h2>Frame two</h2></section>
+<section class="slide"><h2>Frame three</h2></section>
+<section class="slide"><h2>Frame four</h2></section>
+</div></div>
+<script>
+const slides = [...document.querySelectorAll('.slide')];
+let i = 0;
+function go(n) {
+  i = Math.max(0, Math.min(slides.length - 1, n));
+  slides.forEach((s, j) => s.classList.toggle('active', j === i));
+}
+document.querySelectorAll('.pillnav button').forEach(b => b.addEventListener('click', () => go(+b.dataset.go)));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight') go(i + 1);
+  else if (e.key === 'ArrowLeft') go(i - 1);
+});
+</script>
+</body>
+</html>

@@ -98,4 +98,41 @@ final class EditorPipelineTests: XCTestCase {
         try doc.read(from: Data("<html><body><h1>from disk</h1></body></html>".utf8), ofType: "public.html")
         XCTAssertTrue(doc.html.contains("from disk"))
     }
+
+    private func tempDoc(_ html: String) throws -> (WysiDocument, URL, URL) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wysi-doc-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("doc.html")
+        try Data(html.utf8).write(to: file)
+        return (try WysiDocument(contentsOf: file, ofType: "public.html"), file, dir)
+    }
+
+    private func rewrite(_ file: URL, _ html: String) throws {
+        try Data(html.utf8).write(to: file)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: file.path)
+    }
+
+    func testExternalChangeReloadsCleanDocument() throws {
+        let (doc, file, dir) = try tempDoc("<html><body><p>v1</p></body></html>")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertTrue(doc.html.contains("v1"))
+
+        try rewrite(file, "<html><body><p>v2</p></body></html>")
+        doc.checkExternalChange()
+
+        XCTAssertTrue(doc.html.contains("v2"))
+        XCTAssertFalse(doc.isDocumentEdited)
+    }
+
+    func testExternalChangeKeepsDirtyDocument() throws {
+        let (doc, file, dir) = try tempDoc("<html><body><p>v1</p></body></html>")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        doc.htmlEdited("<html><body><p>local edit</p></body></html>")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+
+        try rewrite(file, "<html><body><p>v2</p></body></html>")
+        doc.checkExternalChange()
+
+        XCTAssertTrue(doc.html.contains("local edit"))
+    }
 }
