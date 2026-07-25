@@ -87,9 +87,10 @@ async function run() {
   check('unrelated font-family rules untouched', sheet.textContent.includes('font-family: inherit'));
 
   ops.length = 0;
-  postMessage({ type: 'wy-theme-commit', index: entry('background').index, value: '#0a0b0c' }, '*');
+  check('background shorthand surfaces as background-color', entry('background-color')?.kind === 'color');
+  postMessage({ type: 'wy-theme-commit', index: entry('background-color').index, value: '#0a0b0c' }, '*');
   await until(() => ops.length > 0);
-  check('hex value patched despite rgb serialization', sheet.textContent.includes('background:#0a0b0c'));
+  check('shorthand color patched despite rgb serialization', sheet.textContent.includes('background:#0a0b0c'));
 
   ops.length = 0;
   postMessage({ type: 'wy-theme-commit', index: entry('--spare').index, value: '#778899' }, '*');

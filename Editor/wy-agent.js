@@ -882,7 +882,7 @@
     else if (m.type === 'wy-find') send({ type: 'wy-found', found: !!window.find(m.text, false, !!m.backwards, true, false, false, false) });
   });
 
-  const THEME_PROPS = new Set(['font-family', 'color', 'background', 'background-color']);
+  const THEME_PROPS = new Set(['font-family', 'color', 'background-color']);
   let themeEntries = [];
   let themePreviewStyle = null;
   const themePending = new Map();
@@ -978,6 +978,11 @@
     return probe.style.getPropertyValue(prop).trim();
   }
 
+  function patchProp(text, sourceProp, value, matches) {
+    const re = new RegExp(`(${escapeRe(sourceProp)}\\s*:\\s*)([^;}!]+)`, 'g');
+    return text.replace(re, (match, head, raw) => (matches(raw.trim()) ? head + value : match));
+  }
+
   function themeCommit(index, value) {
     const e = themeEntries[index];
     if (!e) return;
@@ -987,9 +992,11 @@
     const exact = new RegExp(`(${escapeRe(e.prop)}\\s*:\\s*)${escapeRe(e.value)}(?=\\s*(?:!important\\s*)?[;}])`, 'g');
     let patched = text.replace(exact, `$1${value}`);
     if (patched === text) {
-      const any = new RegExp(`(${escapeRe(e.prop)}\\s*:\\s*)([^;}!]+)`, 'g');
-      patched = text.replace(any, (match, head, raw) =>
-        serializedCSSValue(e.prop, raw.trim()) === e.value ? `${head}${value}` : match);
+      patched = patchProp(text, e.prop, value, (raw) => serializedCSSValue(e.prop, raw) === e.value);
+    }
+    if (patched === text && e.prop === 'background-color') {
+      patched = patchProp(text, 'background', value, (raw) =>
+        CSS.supports('color', raw) && serializedCSSValue(e.prop, raw) === e.value);
     }
     if (patched === text) return send({ type: 'wy-error', message: `could not update ${e.prop}` });
     e.el.textContent = patched;
