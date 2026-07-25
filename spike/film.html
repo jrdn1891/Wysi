@@ -8,7 +8,7 @@ const results = [];
 const events = [];
 const frame = document.getElementById('editor');
 
-const DECK = '<!doctype html><html><head><title>deck</title><meta name="theme-color" content="#ff2d55"><style>body{margin:0}section{height:100vh}</style></head><body>' +
+const DECK = '<!doctype html><html><head><title>deck</title><meta name="theme-color" content="#ff2d55"><style>:root{--brand:#112233}body{margin:0}section{height:100vh}</style></head><body>' +
   ['one', 'two', 'three', 'four', 'five'].map(t => `<section><h2>Slide ${t}</h2></section>`).join('') +
   '</body></html>';
 const PLAIN = '<!doctype html><html><head></head><body><p>plain page</p></body></html>';
@@ -38,6 +38,15 @@ check('filmstrip shows five cells', !!(await until(() => cells().length === 5)))
 const thumb = doc().querySelector('.wy-e-thumb');
 check('thumbnails are shifted snapshots', !!thumb && (thumb.dataset.doc || '').includes('translateY'));
 check('filmstrip adopts the document accent', doc().querySelector('.wy-e-film').style.getPropertyValue('--wy-accent').trim() === '#ff2d55');
+
+const theme = await until(() => events.find(m => m.type === 'theme' && m.entries.some(e => e.name === '--brand')));
+check('theme entries reach the session bridge', !!theme);
+if (theme) {
+  events.length = 0;
+  win.wysi.themeCommit(theme.entries.find(e => e.name === '--brand').index, '#445566');
+  const themed = await until(() => events.find(m => m.type === 'changed' && m.html.includes('--brand:#445566')));
+  check('theme commit lands in the serialized document', !!themed);
+}
 
 events.length = 0;
 doc().querySelectorAll('.wy-e-slide-x')[1].click();

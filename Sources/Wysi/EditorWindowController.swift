@@ -1,10 +1,12 @@
 import AppKit
+import SwiftUI
 import WebKit
 
-final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation, WKUIDelegate, NSSharingServicePickerToolbarItemDelegate {
+final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation, WKUIDelegate, NSSharingServicePickerToolbarItemDelegate, NSPopoverDelegate {
     private static let modeItem = NSToolbarItem.Identifier("mode")
     private static let playItem = NSToolbarItem.Identifier("play")
     private static let shareItem = NSToolbarItem.Identifier("share")
+    private static let themeItem = NSToolbarItem.Identifier("theme")
     private static let addLibraryItem = NSToolbarItem.Identifier("addLibrary")
 
     private var webView: WKWebView!
@@ -12,6 +14,10 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
     private let bridge = Bridge()
     private var pendingFlush: (() -> Void)?
     private(set) var mode = "preview"
+    private var themeButton: NSButton?
+    private var themeRaw: [[String: Any]] = []
+    private var themeModel: ThemeModel?
+    private var themePopover: NSPopover?
 
     private var wysiDocument: WysiDocument? { document as? WysiDocument }
 
@@ -85,7 +91,41 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
         guard next != mode else { return }
         mode = next
         modeControl?.selectedSegment = next == "edit" ? 1 : 0
+        themeButton?.isEnabled = next == "edit"
+        if next != "edit" {
+            themeRaw = []
+            themePopover?.performClose(nil)
+        }
         webView.evaluateJavaScript("wysi.setMode('\(next)')")
+    }
+
+    @objc private func showTheme(_ sender: NSButton) {
+        if let popover = themePopover, popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+        let model = ThemeModel(
+            raw: themeRaw,
+            preview: { [weak self] index, value in
+                guard let self else { return }
+                self.webView.evaluateJavaScript("wysi.themePreview(\(index), \(self.json(value)))")
+            },
+            commit: { [weak self] index, value in
+                guard let self else { return }
+                self.webView.evaluateJavaScript("wysi.themeCommit(\(index), \(self.json(value)))")
+            }
+        )
+        themeModel = model
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView: ThemePanel(model: model))
+        popover.delegate = self
+        themePopover = popover
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+    }
+
+    func popoverWillClose(_ notification: Notification) {
+        themeModel?.commitDirty()
     }
 
     @objc private func segmentChanged(_ sender: NSSegmentedControl) {
@@ -131,6 +171,8 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             let pending = pendingFlush
             pendingFlush = nil
             pending?()
+        case "theme":
+            themeRaw = body["entries"] as? [[String: Any]] ?? []
         case "undo":
             wysiDocument?.undoManager?.undo()
         case "redo":
@@ -168,6 +210,15 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             item.target = self
             item.action = #selector(play(_:))
             return item
+        case Self.themeItem:
+            let button = NSButton(image: NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "Theme")!, target: self, action: #selector(showTheme(_:)))
+            button.bezelStyle = .texturedRounded
+            button.isEnabled = mode == "edit"
+            themeButton = button
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Theme"
+            item.view = button
+            return item
         case Self.shareItem:
             let item = NSSharingServicePickerToolbarItem(itemIdentifier: itemIdentifier)
             item.delegate = self
@@ -186,11 +237,11 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.modeItem, .flexibleSpace, Self.shareItem, Self.playItem]
+        [.flexibleSpace, Self.modeItem, .flexibleSpace, Self.themeItem, Self.shareItem, Self.playItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.modeItem, Self.playItem, Self.shareItem, Self.addLibraryItem]
+        [.flexibleSpace, Self.modeItem, Self.playItem, Self.themeItem, Self.shareItem, Self.addLibraryItem]
     }
 }
 

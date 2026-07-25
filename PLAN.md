@@ -131,8 +131,18 @@ The JS editor core stays dependency-free vanilla ES modules, runnable in a plain
 - **Parser divergence** on malformed HTML between `DOMParser` and the live engine — same engine (WebKit) on both sides in WYSI, which is actually a stronger position than quickhost's; the signature harness guards it.
 - **Script-generated content isn't editable** — accepted and documented; the placeholder/`llms.txt` convention pushes generating agents toward static markup.
 
+## Property editing
+
+Two layers, both riding the existing op machinery — a `<style>` element's `innerHTML` is its CSS text, so patching a declaration is a `setHTML` op (with one extension: ops carry `root: 'head'` since style blocks live outside `<body>`).
+
+- **Document theme (phase A)**: the agent enumerates custom properties and body-level declarations from inline stylesheets, classifies them (color / gradient / font / simple size), and reports them to Swift. A native Theme popover shows real controls — `NSColorWell` with eyedropper, font-stack picker, size steppers. Dragging previews via an injected override style (instant, touches nothing); committing textually patches the declaration in place, anchored on `name: old-value`, replacing all occurrences (handles `@media` re-declarations) and leaving every other byte of the file alone. Cross-origin sheets are skipped; documents without variables (Tailwind CDN) get an honest empty state.
+- **Element format bar (phase B)**: color/size/weight/alignment on the current edit target via the `style` attribute (`setAttr` op), with a computed-style check that re-applies with `!important` when the document's own CSS wins.
+- **Phase C**: gradient stop editing (per-stop color wells), curated web-font additions.
+
+Not attempted, permanently: arbitrary selector/cascade editing — that is DevTools, not WYSI. Document-wide *size* editing only exists where size variables exist; agent decks mostly use `clamp()` inside rules, which stays read-only.
+
 ## Roadmap after v1
 
-1. **Color/property inspector** — highest leverage first step: detect `:root` CSS custom properties (agent HTML almost always defines its palette there) and offer native swatches; one variable edit re-themes the whole document. Element-level style editing after.
+1. **Element format bar + gradient stops** — phases B and C above.
 2. **Publish integration** — one-click publish to quickhost.my (its `handlePublish` API, edit tokens, invites, and comments already exist; WYSI keeps the token and pushes updates on save). This is a sharing channel, not the collaboration answer: multi-editor collaboration stays an open design question — candidates include CRDT-style sync on the file, a dedicated service, or OS-level file sharing — and gets decided on its own merits when we get there.
 3. Finer undo (inverse ops; keep caret and scroll), `NSFileVersion` history UI, text-style toolbar (bold/links), paste-to-replace-image, Quick Look extension, Spotlight importer for `<title>`.

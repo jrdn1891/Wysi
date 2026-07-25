@@ -27,16 +27,20 @@
     parent.postMessage(msg, '*');
   }
 
-  function pathOf(node) {
+  function pathIn(root, node) {
     const path = [];
     let n = node;
-    while (n && n !== document.body) {
+    while (n && n !== root) {
       const p = n.parentNode;
       if (!p) return null;
       path.unshift([...p.childNodes].indexOf(n));
       n = p;
     }
-    return n === document.body ? path : null;
+    return n === root ? path : null;
+  }
+
+  function pathOf(node) {
+    return pathIn(document.body, node);
   }
 
   function nodeFromPath(path) {
@@ -697,9 +701,118 @@
     else if (m.type === 'wy-move') moveSlide(m.path, m.before);
     else if (m.type === 'wy-duplicate') duplicateSlide(m.path);
     else if (m.type === 'wy-scroll-to') scrollToSlide(m.path);
+    else if (m.type === 'wy-theme-preview') themePreview(m.index, m.value);
+    else if (m.type === 'wy-theme-commit') themeCommit(m.index, m.value);
   });
 
+  const THEME_PROPS = new Set(['font-family', 'color', 'background', 'background-color']);
+  let themeEntries = [];
+  let themePreviewStyle = null;
+  const themePending = new Map();
+
+  function collectRules(list, out) {
+    for (const rule of list) {
+      if (rule.style) out.push(rule);
+      if (rule.cssRules && rule.cssRules.length) collectRules(rule.cssRules, out);
+    }
+    return out;
+  }
+
+  function normalizeColor(value) {
+    const probe = document.createElement('div');
+    probe.style.color = value;
+    if (!probe.style.color) return null;
+    probe.style.display = 'none';
+    document.body.appendChild(probe);
+    const rgb = getComputedStyle(probe).color;
+    probe.remove();
+    const m = rgb.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
+    return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null;
+  }
+
+  function classifyTheme(prop, value) {
+    if (/gradient\(/.test(value)) return null;
+    if (/font|family/i.test(prop)) return { kind: 'font' };
+    if (CSS.supports('color', value) || /^var\(/.test(value)) {
+      const rgba = normalizeColor(value);
+      if (rgba) return { kind: 'color', rgba };
+    }
+    if (/^-?[\d.]+(px|rem|em|vw|vh|%)$/.test(value)) return { kind: 'size' };
+    return null;
+  }
+
+  function collectTheme() {
+    const byProp = new Map();
+    for (const styleEl of document.querySelectorAll('style:not([data-wy-ui])')) {
+      let rules;
+      try { rules = styleEl.sheet ? collectRules(styleEl.sheet.cssRules, []) : []; } catch { continue; }
+      for (const rule of rules) {
+        const selectors = (rule.selectorText || '').split(',').map(s => s.trim().toLowerCase());
+        if (!selectors.some(s => s === ':root' || s === 'html' || s === 'body')) continue;
+        for (let i = 0; i < rule.style.length; i++) {
+          const prop = rule.style.item(i);
+          if (!prop.startsWith('--') && !THEME_PROPS.has(prop)) continue;
+          const value = rule.style.getPropertyValue(prop).trim();
+          const cls = classifyTheme(prop, value);
+          if (!cls) continue;
+          byProp.set(prop, { el: styleEl, prop, value, kind: cls.kind, rgba: cls.rgba ?? null });
+        }
+      }
+    }
+    themeEntries = [...byProp.values()];
+    send({
+      type: 'wy-theme',
+      entries: themeEntries.map((e, index) => ({ index, kind: e.kind, name: e.prop, value: e.value, rgba: e.rgba })),
+    });
+  }
+
+  function renderThemePreview() {
+    if (!themePreviewStyle) {
+      themePreviewStyle = document.createElement('style');
+      themePreviewStyle.setAttribute('data-wy-ui', '');
+      document.head.appendChild(themePreviewStyle);
+    }
+    const root = [];
+    const body = [];
+    for (const [i, v] of themePending) {
+      const e = themeEntries[i];
+      if (!e) continue;
+      if (e.prop.startsWith('--')) root.push(`${e.prop}: ${v}`);
+      else body.push(`${e.prop}: ${v} !important`);
+    }
+    themePreviewStyle.textContent =
+      (root.length ? `:root { ${root.join('; ')} }` : '') +
+      (body.length ? ` body { ${body.join('; ')} }` : '');
+  }
+
+  function themePreview(index, value) {
+    if (!themeEntries[index]) return;
+    themePending.set(index, value);
+    renderThemePreview();
+  }
+
+  function escapeRe(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function themeCommit(index, value) {
+    const e = themeEntries[index];
+    if (!e) return;
+    themePending.delete(index);
+    renderThemePreview();
+    const re = new RegExp(`(${escapeRe(e.prop)}\\s*:\\s*)${escapeRe(e.value)}(?=\\s*(?:!important\\s*)?[;}])`, 'g');
+    const text = e.el.textContent;
+    const patched = text.replace(re, `$1${value}`);
+    if (patched === text) return send({ type: 'wy-error', message: `could not update ${e.prop}` });
+    e.el.textContent = patched;
+    const path = pathIn(document.head, e.el);
+    if (path) send({ type: 'wy-ops', ops: [{ kind: 'setHTML', root: 'head', path, html: patched }] });
+    scheduleSlides();
+    collectTheme();
+  }
+
   const placeholderStyle = document.createElement('style');
+  placeholderStyle.setAttribute('data-wy-ui', '');
   document.head.appendChild(placeholderStyle);
 
   function luma(color) {
@@ -728,6 +841,10 @@
   }
 
   applyAccent();
-  window.addEventListener('load', applyAccent);
+  collectTheme();
+  window.addEventListener('load', () => {
+    applyAccent();
+    collectTheme();
+  });
   scheduleSlides();
 })();

@@ -50,7 +50,7 @@ function render() {
 
 function applyOps(ops) {
   for (const op of ops) {
-    const n = nodeAtPath(canonical.body, op.path);
+    const n = nodeAtPath(op.root === 'head' ? canonical.head : canonical.body, op.path);
     if (!n || n.nodeType !== 1) continue;
     if (op.kind === 'setHTML') n.innerHTML = op.html;
     else if (op.kind === 'remove') n.remove();
@@ -80,6 +80,7 @@ window.addEventListener('message', (e) => {
   const m = e.data;
   if (!m || typeof m !== 'object') return;
   if (m.type === 'wy-ops') applyOps(m.ops);
+  else if (m.type === 'wy-theme') notify({ type: 'theme', entries: m.entries });
   else if (m.type === 'wy-slides') onSlides(m);
   else if (m.type === 'wy-current') setCurrent(m.index);
   else if (m.type === 'wy-flushed') flushDone();
@@ -314,6 +315,12 @@ window.wysi = {
     if (mode !== 'edit' || !iframe.contentWindow) return notify({ type: 'flushed' });
     flushTimer = setTimeout(flushDone, 1000);
     iframe.contentWindow.postMessage({ type: 'wy-flush' }, '*');
+  },
+  themePreview(index, value) {
+    post({ type: 'wy-theme-preview', index, value });
+  },
+  themeCommit(index, value) {
+    post({ type: 'wy-theme-commit', index, value });
   },
   serialize: () => canonical && serialize(),
 };

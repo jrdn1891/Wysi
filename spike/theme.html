@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: theme patcher</title>
+<style id="sheet">
+/* palette */
+:root{
+  --ink: #16161a;
+  --accent: rgb(58, 111, 208);
+  --pad: 24px;
+  --heading-font: Georgia, serif;
+  --grad: linear-gradient(90deg, #000, #fff);
+}
+@media (min-width: 10px){
+  :root{ --pad: 24px; }
+}
+body{ font-family: Arial, sans-serif; color: var(--ink); }
+.x{ font-family: inherit; }
+</style>
+<pre id="results">running…</pre>
+<div id="content"><h1>Theme target</h1><p>Some text.</p></div>
+<script>
+const results = [];
+const ops = [];
+let themeMsg = null;
+
+function check(name, ok, detail) {
+  results.push({ name, ok, ...(detail ? { detail } : {}) });
+}
+function tick() { return new Promise(r => setTimeout(r, 50)); }
+async function until(fn, timeout = 8000) {
+  const deadline = performance.now() + timeout;
+  while (performance.now() < deadline) {
+    const v = fn();
+    if (v) return v;
+    await tick();
+  }
+  return null;
+}
+function entry(name) {
+  return themeMsg.entries.find(e => e.name === name);
+}
+
+addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || typeof m.type !== 'string') return;
+  if (m.type === 'wy-theme') themeMsg = m;
+  if (m.type === 'wy-ops') ops.push(...m.ops);
+});
+
+async function run() {
+  await until(() => themeMsg);
+  check('theme entries reported', !!themeMsg);
+  check('color var classified with rgba', entry('--ink')?.kind === 'color' && entry('--ink')?.rgba?.r === 22);
+  check('size var classified', entry('--pad')?.kind === 'size' && entry('--pad')?.value === '24px');
+  check('font var classified', entry('--heading-font')?.kind === 'font');
+  check('body font-family reported', entry('font-family')?.kind === 'font' && entry('font-family')?.value === 'Arial, sans-serif');
+  check('var-referencing body color resolved', entry('color')?.kind === 'color' && entry('color')?.rgba?.r === 22);
+  check('gradient var excluded', !entry('--grad'));
+
+  const sheet = document.getElementById('sheet');
+  const before = sheet.textContent;
+  postMessage({ type: 'wy-theme-preview', index: entry('--accent').index, value: '#ff0000' }, '*');
+  await until(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#ff0000');
+  check('preview overrides the computed value', getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#ff0000');
+  check('preview leaves the stylesheet untouched', sheet.textContent === before);
+  check('preview emits no ops', ops.length === 0);
+
+  postMessage({ type: 'wy-theme-commit', index: entry('--accent').index, value: '#00ff88' }, '*');
+  await until(() => ops.length > 0);
+  check('commit patches the declaration in place', sheet.textContent.includes('--accent: #00ff88'));
+  check('commit preserves comments and formatting', sheet.textContent.includes('/* palette */') && sheet.textContent.includes('--ink: #16161a'));
+  check('commit clears the preview override', getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#00ff88');
+  const op = ops[0];
+  check('op targets the head-rooted style element', op.kind === 'setHTML' && op.root === 'head' && op.html === sheet.textContent);
+  check('theme re-sent with committed value', !!(await until(() => entry('--accent')?.value === '#00ff88')));
+
+  ops.length = 0;
+  postMessage({ type: 'wy-theme-commit', index: entry('--pad').index, value: '32px' }, '*');
+  await until(() => ops.length > 0);
+  check('duplicate declarations patched everywhere', (sheet.textContent.match(/--pad: 32px/g) || []).length === 2);
+
+  ops.length = 0;
+  postMessage({ type: 'wy-theme-commit', index: entry('font-family').index, value: "'Helvetica Neue', sans-serif" }, '*');
+  await until(() => ops.length > 0);
+  check('body font patched', sheet.textContent.includes("font-family: 'Helvetica Neue', sans-serif"));
+  check('unrelated font-family rules untouched', sheet.textContent.includes('font-family: inherit'));
+
+  const pass = results.every(r => r.ok);
+  document.getElementById('results').textContent =
+    'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+  document.title = 'SPIKE-DONE';
+}
+run();
+</script>
+<script src="/Editor/wy-agent.js"></script>
