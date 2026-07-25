@@ -122,6 +122,14 @@ struct LibraryView: View {
     private var table: some View {
         Table(shown, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("") { doc in
+                DocThumbnail(url: doc.url, mtime: doc.modified)
+                    .frame(width: 64, height: 40)
+                    .allowsHitTesting(false)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(nsColor: .separatorColor)))
+            }
+            .width(68)
+            TableColumn("") { doc in
                 Button { store.toggleFavorite(doc) } label: {
                     Image(systemName: doc.favorite ? "star.fill" : "star")
                         .foregroundStyle(doc.favorite ? AnyShapeStyle(.yellow) : AnyShapeStyle(.secondary))
@@ -145,6 +153,7 @@ struct LibraryView: View {
                 Text(doc.modified, format: .relative(presentation: .named))
             }
         }
+        .environment(\.defaultMinListRowHeight, 48)
         .contextMenu(forSelectionType: LibraryDoc.ID.self) { ids in
             menuItems(for: docs(for: ids))
         } primaryAction: { ids in
