@@ -10,6 +10,12 @@ let flushTimer = null;
 
 const agentSrc = (await (await fetch('wy-agent.js')).text()).replace(/<\/script/gi, '<\\/script');
 
+const FIND_AGENT = `<script>addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || m.type !== 'wy-find') return;
+  parent.postMessage({ type: 'wy-found', found: !!window.find(m.text, false, !!m.backwards, true, false, false, false) }, '*');
+});<\/script>`;
+
 function notify(msg) {
   if (native) native.postMessage(msg);
   else window.dispatchEvent(new CustomEvent('wysi-notify', { detail: msg }));
@@ -45,7 +51,7 @@ function nodeAtPath(root, path) {
 function render() {
   if (!canonical) return;
   if (mode !== 'edit') hideFilm();
-  iframe.srcdoc = mode === 'edit' ? snapshot() + `<script>${agentSrc}</script>` : serialize();
+  iframe.srcdoc = mode === 'edit' ? snapshot() + `<script>${agentSrc}</script>` : serialize() + FIND_AGENT;
 }
 
 function applyOps(ops) {
@@ -80,6 +86,7 @@ window.addEventListener('message', (e) => {
   const m = e.data;
   if (!m || typeof m !== 'object') return;
   if (m.type === 'wy-ops') applyOps(m.ops);
+  else if (m.type === 'wy-found') notify({ type: 'found', found: m.found });
   else if (m.type === 'wy-theme') notify({ type: 'theme', entries: m.entries });
   else if (m.type === 'wy-slides') onSlides(m);
   else if (m.type === 'wy-current') setCurrent(m.index);
@@ -315,6 +322,9 @@ window.wysi = {
     if (mode !== 'edit' || !iframe.contentWindow) return notify({ type: 'flushed' });
     flushTimer = setTimeout(flushDone, 1000);
     iframe.contentWindow.postMessage({ type: 'wy-flush' }, '*');
+  },
+  find(text, backwards) {
+    post({ type: 'wy-find', text, backwards });
   },
   themePreview(index, value) {
     post({ type: 'wy-theme-preview', index, value });

@@ -5,6 +5,8 @@ import WebKit
 final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation, WKUIDelegate, NSSharingServicePickerToolbarItemDelegate, NSPopoverDelegate {
     private static let modeItem = NSToolbarItem.Identifier("mode")
     private static let playItem = NSToolbarItem.Identifier("play")
+    private static let undoItem = NSToolbarItem.Identifier("undo")
+    private static let redoItem = NSToolbarItem.Identifier("redo")
     private static let shareItem = NSToolbarItem.Identifier("share")
     private static let themeItem = NSToolbarItem.Identifier("theme")
     private static let addLibraryItem = NSToolbarItem.Identifier("addLibrary")
@@ -18,6 +20,8 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
     private var themeRaw: [[String: Any]] = []
     private var themeModel: ThemeModel?
     private var themePopover: NSPopover?
+    private var findAccessory: NSTitlebarAccessoryViewController?
+    private let findModel = FindModel()
 
     private var wysiDocument: WysiDocument? { document as? WysiDocument }
 
@@ -128,6 +132,56 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
         themeModel?.commitDirty()
     }
 
+    @objc func showFind(_ sender: Any?) {
+        hideFind()
+        let accessory = NSTitlebarAccessoryViewController()
+        let view = NSHostingView(rootView: FindBar(model: findModel))
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 34)
+        accessory.view = view
+        accessory.layoutAttribute = .bottom
+        findModel.onSearch = { [weak self] text, backwards in self?.find(text, backwards: backwards) }
+        findModel.onClose = { [weak self] in self?.hideFind() }
+        window?.addTitlebarAccessoryViewController(accessory)
+        findAccessory = accessory
+    }
+
+    @objc func findNext(_ sender: Any?) {
+        find(findModel.text, backwards: false)
+    }
+
+    @objc func findPrevious(_ sender: Any?) {
+        find(findModel.text, backwards: true)
+    }
+
+    private func hideFind() {
+        if let findAccessory, let index = window?.titlebarAccessoryViewControllers.firstIndex(of: findAccessory) {
+            window?.removeTitlebarAccessoryViewController(at: index)
+        }
+        findAccessory = nil
+        window?.makeFirstResponder(webView)
+    }
+
+    private func find(_ text: String, backwards: Bool) {
+        guard !text.isEmpty else { return }
+        webView.evaluateJavaScript("wysi.find(\(json(text)), \(backwards))")
+    }
+
+    @objc private func undoClicked(_ sender: Any?) {
+        wysiDocument?.undoManager?.undo()
+    }
+
+    @objc private func redoClicked(_ sender: Any?) {
+        wysiDocument?.undoManager?.redo()
+    }
+
+    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        switch item.itemIdentifier {
+        case Self.undoItem: return wysiDocument?.undoManager?.canUndo ?? false
+        case Self.redoItem: return wysiDocument?.undoManager?.canRedo ?? false
+        default: return true
+        }
+    }
+
     @objc private func segmentChanged(_ sender: NSSegmentedControl) {
         setMode(sender.selectedSegment == 1 ? "edit" : "preview")
     }
@@ -173,6 +227,8 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             pending?()
         case "theme":
             themeRaw = body["entries"] as? [[String: Any]] ?? []
+        case "found":
+            if body["found"] as? Bool == false { NSSound.beep() }
         case "undo":
             wysiDocument?.undoManager?.undo()
         case "redo":
@@ -210,6 +266,22 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
             item.target = self
             item.action = #selector(play(_:))
             return item
+        case Self.undoItem:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Undo"
+            item.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: "Undo")
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(undoClicked(_:))
+            return item
+        case Self.redoItem:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Redo"
+            item.image = NSImage(systemSymbolName: "arrow.uturn.forward", accessibilityDescription: "Redo")
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(redoClicked(_:))
+            return item
         case Self.themeItem:
             let button = NSButton(image: NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "Theme")!, target: self, action: #selector(showTheme(_:)))
             button.bezelStyle = .texturedRounded
@@ -237,11 +309,11 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMen
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.modeItem, .flexibleSpace, Self.themeItem, Self.shareItem, Self.playItem]
+        [Self.undoItem, Self.redoItem, .flexibleSpace, Self.modeItem, .flexibleSpace, Self.themeItem, Self.shareItem, Self.playItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.modeItem, Self.playItem, Self.themeItem, Self.shareItem, Self.addLibraryItem]
+        [.flexibleSpace, Self.modeItem, Self.playItem, Self.themeItem, Self.shareItem, Self.undoItem, Self.redoItem, Self.addLibraryItem]
     }
 }
 

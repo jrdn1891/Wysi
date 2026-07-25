@@ -25,13 +25,17 @@ private final class Collector: NSObject, WKScriptMessageHandler {
 
 @MainActor
 final class EditorPipelineTests: XCTestCase {
+    private struct TimedOut: Error {
+        let what: String
+    }
+
     private func waitFor(_ type: String, in collector: Collector, timeout: TimeInterval = 10) async throws -> [String: Any] {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if let m = collector.take(type) { return m }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        throw XCTSkip("timeout waiting for '\(type)'")
+        throw TimedOut(what: type)
     }
 
     private func json(_ s: String) -> String {
@@ -73,7 +77,35 @@ final class EditorPipelineTests: XCTestCase {
             if let value = await op() { return value }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
-        throw XCTSkip("timeout waiting for serialized document")
+        throw TimedOut(what: "serialized document")
+    }
+
+    func testFindPiercesTheDocumentFrame() async throws {
+        let config = WKWebViewConfiguration()
+        config.setURLSchemeHandler(WysiSchemeHandler(base: repoRoot.appendingPathComponent("Editor")), forURLScheme: "wysi")
+        let collector = Collector()
+        config.userContentController.add(collector, name: "wysi")
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 800), configuration: config)
+        webView.load(URLRequest(url: URL(string: "wysi://app/editor.html")!))
+        _ = try await waitFor("ready", in: collector)
+
+        let demo = try String(contentsOf: repoRoot.appendingPathComponent("spike/demo.html"), encoding: .utf8)
+        webView.evaluateJavaScript("wysi.load(\(json(demo)), 'preview')", completionHandler: nil)
+        _ = try await withTimeoutPoll {
+            (try? await webView.evaluateJavaScript("wysi.serialize()")) as? String
+        }
+
+        var found: [String: Any]?
+        for _ in 0..<10 where found == nil {
+            webView.evaluateJavaScript("wysi.find('Launch announcement', false)", completionHandler: nil)
+            found = try? await waitFor("found", in: collector, timeout: 1)
+        }
+        XCTAssertEqual(found?["found"] as? Bool, true, "find must reach content inside the document iframe")
+
+        collector.clear()
+        webView.evaluateJavaScript("wysi.find('no such phrase anywhere', false)", completionHandler: nil)
+        let missing = try await waitFor("found", in: collector)
+        XCTAssertEqual(missing["found"] as? Bool, false)
     }
 
     func testDocumentEditUndoRedo() throws {

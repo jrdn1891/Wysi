@@ -72,6 +72,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let redo = edit.addItem(withTitle: "Redo", action: #selector(WysiDocument.docRedo(_:)), keyEquivalent: "z")
         redo.keyEquivalentModifierMask = [.command, .shift]
         edit.addItem(.separator())
+        edit.addItem(withTitle: "Find…", action: #selector(EditorWindowController.showFind(_:)), keyEquivalent: "f")
+        edit.addItem(withTitle: "Find Next", action: #selector(EditorWindowController.findNext(_:)), keyEquivalent: "g")
+        let findPrev = edit.addItem(withTitle: "Find Previous", action: #selector(EditorWindowController.findPrevious(_:)), keyEquivalent: "g")
+        findPrev.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(.separator())
         edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")

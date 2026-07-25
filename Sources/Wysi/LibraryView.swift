@@ -26,10 +26,15 @@ struct LibraryView: View {
         if !filter.isEmpty {
             docs = docs.filter {
                 $0.title.localizedCaseInsensitiveContains(filter) ||
-                $0.filename.localizedCaseInsensitiveContains(filter)
+                $0.filename.localizedCaseInsensitiveContains(filter) ||
+                store.contentSnippet($0, matching: filter) != nil
             }
         }
         return docs.sorted(using: sortOrder)
+    }
+
+    private func snippet(for doc: LibraryDoc) -> String? {
+        filter.isEmpty ? nil : store.contentSnippet(doc, matching: filter)
     }
 
     var body: some View {
@@ -89,9 +94,9 @@ struct LibraryView: View {
             }
             .fixedSize()
             Spacer()
-            TextField("Filter", text: $filter)
+            TextField("Search titles and content", text: $filter)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 200)
+                .frame(width: 220)
             Text("^[\(shown.count) document](inflect: true)")
                 .foregroundStyle(.secondary)
         }
@@ -100,14 +105,14 @@ struct LibraryView: View {
 
     private var grid: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16)], spacing: 16) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 14)], spacing: 14) {
                 ForEach(shown) { doc in
-                    DocCard(doc: doc, open: { open(doc) }) {
+                    DocCard(doc: doc, snippet: snippet(for: doc), open: { open(doc) }) {
                         menuItems(for: [doc])
                     }
                 }
             }
-            .padding(16)
+            .padding(14)
         }
     }
 
@@ -121,7 +126,17 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
             }
             .width(24)
-            TableColumn("Title", value: \.title)
+            TableColumn("Title", value: \.title) { doc in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(doc.title)
+                    if let snippet = snippet(for: doc) {
+                        Text(snippet)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
             TableColumn("File", value: \.filename)
             TableColumn("Modified", value: \.modified) { doc in
                 Text(doc.modified, format: .relative(presentation: .named))
@@ -192,11 +207,13 @@ struct LibraryView: View {
 
 private struct DocCard<Menu: View>: View {
     let doc: LibraryDoc
+    let snippet: String?
     let open: () -> Void
     let menu: () -> Menu
 
-    init(doc: LibraryDoc, open: @escaping () -> Void, @ViewBuilder menu: @escaping () -> Menu) {
+    init(doc: LibraryDoc, snippet: String?, open: @escaping () -> Void, @ViewBuilder menu: @escaping () -> Menu) {
         self.doc = doc
+        self.snippet = snippet
         self.open = open
         self.menu = menu
     }
@@ -218,6 +235,12 @@ private struct DocCard<Menu: View>: View {
                 }
             Text(doc.title)
                 .lineLimit(1)
+            if let snippet {
+                Text(snippet)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
             Text(doc.modified, format: .relative(presentation: .named))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -246,7 +269,7 @@ private struct DocThumbnail: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        webView.magnification = 0.25
+        webView.magnification = 0.15
         let key = "\(url.path)|\(mtime.timeIntervalSince1970)"
         guard context.coordinator.key != key else { return }
         context.coordinator.key = key

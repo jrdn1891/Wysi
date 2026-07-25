@@ -15,7 +15,10 @@ final class LibraryWindowController: NSWindowController {
         window.center()
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("WysiLibrary")
-        window.contentViewController = NSHostingController(rootView: LibraryView(store: .shared))
+        window.toolbarStyle = .unified
+        let hosting = NSHostingController(rootView: LibraryView(store: .shared))
+        hosting.sceneBridgingOptions = [.toolbars]
+        window.contentViewController = hosting
         super.init(window: window)
     }
 

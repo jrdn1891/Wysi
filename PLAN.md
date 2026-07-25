@@ -81,7 +81,7 @@ Undo lives in `NSUndoManager` as full-document string snapshots (quickhost's mod
 ## The library
 
 - One folder, default `~/Documents/WYSI`, user-relocatable (security-scoped bookmark). Files in it are plain `.html`, fully visible and usable in Finder — "managed" means WYSI watches and displays the folder, not that files are hidden in an opaque bundle.
-- Library window: sidebar (All Files / Favorites) beside a thumbnail grid or sortable list view (toggle persists). Filter field, sort by modified/title/filename. Cards show a live thumbnail, `<title>` (falls back to filename), modified date, and a star badge; favorites are stored as a Finder tag ("Favorite") on the file itself, so they survive moves and show in Finder.
+- Library window: sidebar (All Files / Favorites) beside a thumbnail grid or sortable list view (toggle persists). The search field matches titles, filenames, and document text — content is extracted with script/style/tag stripping, cached by mtime, and matches show a context snippet on the card or row. Sort by modified/title/filename. Cards show a live thumbnail, `<title>` (falls back to filename), modified date, and a star badge; favorites are stored as a Finder tag ("Favorite") on the file itself, so they survive moves and show in Finder.
 - Thumbnails: live scaled-down `WKWebView`s (magnification ~0.25), one per visible card, lazily mounted by the grid — quickhost's workspace-card pattern. No snapshot cache to invalidate; FSEvents on the folder reloads cards live as agents write files.
 - Card actions: open, inline rename, Duplicate, Move to Trash, Reveal in Finder, drag-out (real file drag), Share (`NSSharingServicePicker`).
 - Import: drag files into the window or Dock icon, or File → Import — copies into the library.
@@ -101,7 +101,7 @@ Undo lives in `NSUndoManager` as full-document string snapshots (quickhost's mod
 
 **Slide duplicate** (new op): `duplicate {path}` — the live DOM and the canonical document each clone their own node at the path and insert it after itself. No HTML payload round-trip, so the copy is byte-identical by construction.
 
-**Keyboard**: Cmd-S save now, Cmd-Z/Shift-Cmd-Z undo/redo, Cmd-E edit/preview, Esc cancel or exit edit, Enter commit text. In Edit mode arrows/PageUp/PageDown/Space page through the document — slide-by-slide when a deck is detected.
+**Keyboard**: Cmd-S save now, Cmd-Z/Shift-Cmd-Z undo/redo (also as toolbar buttons), Cmd-E edit/preview, Cmd-F find in document (titlebar bar; Cmd-G / Shift-Cmd-G next/previous, wraps, works in both modes via a `window.find` message agent since `WKWebView.find` cannot see into the sandboxed iframe), Esc cancel or exit edit, Enter commit text. In Edit mode arrows/PageUp/PageDown/Space page through the document — slide-by-slide when a deck is detected.
 
 ## Milestones — each with its verification check
 

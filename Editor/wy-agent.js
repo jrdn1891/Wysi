@@ -879,6 +879,7 @@
     else if (m.type === 'wy-scroll-to') scrollToSlide(m.path);
     else if (m.type === 'wy-theme-preview') themePreview(m.index, m.value);
     else if (m.type === 'wy-theme-commit') themeCommit(m.index, m.value);
+    else if (m.type === 'wy-find') send({ type: 'wy-found', found: !!window.find(m.text, false, !!m.backwards, true, false, false, false) });
   });
 
   const THEME_PROPS = new Set(['font-family', 'color', 'background', 'background-color']);

@@ -99,6 +99,38 @@ final class LibraryStore: ObservableObject {
             .sorted { $0.modified > $1.modified }
     }
 
+    private var textCache: [URL: (mtime: Date, text: String)] = [:]
+
+    func contentSnippet(_ doc: LibraryDoc, matching query: String) -> String? {
+        let text = extractedText(doc)
+        guard let range = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) else { return nil }
+        let start = text.index(range.lowerBound, offsetBy: -40, limitedBy: text.startIndex) ?? text.startIndex
+        let end = text.index(range.upperBound, offsetBy: 60, limitedBy: text.endIndex) ?? text.endIndex
+        let prefix = start > text.startIndex ? "…" : ""
+        let suffix = end < text.endIndex ? "…" : ""
+        return prefix + text[start..<end].trimmingCharacters(in: .whitespacesAndNewlines) + suffix
+    }
+
+    private func extractedText(_ doc: LibraryDoc) -> String {
+        if let cached = textCache[doc.url], cached.mtime == doc.modified { return cached.text }
+        let html = (try? String(contentsOf: doc.url, encoding: .utf8)) ?? ""
+        let text = Self.textContent(of: html)
+        textCache[doc.url] = (doc.modified, text)
+        return text
+    }
+
+    static func textContent(of html: String) -> String {
+        var s = html
+        for pattern in ["<script[\\s\\S]*?</script>", "<style[\\s\\S]*?</style>", "<[^>]+>"] {
+            s = s.replacingOccurrences(of: pattern, with: " ", options: [.regularExpression, .caseInsensitive])
+        }
+        for (entity, char) in ["&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&nbsp;": " "] {
+            s = s.replacingOccurrences(of: entity, with: char)
+        }
+        return s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+    }
+
     func toggleFavorite(_ doc: LibraryDoc) {
         let ns = doc.url as NSURL
         var tags = ((try? ns.resourceValues(forKeys: [.tagNamesKey])[.tagNamesKey]) as? [String]) ?? []

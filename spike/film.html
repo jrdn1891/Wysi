@@ -60,6 +60,13 @@ check('plus duplicates a cell', !!(await until(() => cells().length === 5)));
 const dupe = events.find(m => m.type === 'changed');
 check('duplicate lands in the document', !!dupe && (dupe.html.match(/Slide one/g) || []).length === 2);
 
+events.length = 0;
+win.document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true }));
+check('session forwards cmd-z as undo', !!(await until(() => events.find(m => m.type === 'undo'))));
+events.length = 0;
+win.document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+check('session forwards shift-cmd-z as redo', !!(await until(() => events.find(m => m.type === 'redo'))));
+
 win.wysi.load(PLAIN, 'edit');
 await until(() => doc().querySelector('.wy-e-film')?.hidden === true);
 check('non-deck hides the filmstrip', doc().querySelector('.wy-e-film')?.hidden === true);

@@ -77,6 +77,17 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertFalse(store.contains(folder.appendingPathComponent("a.html")))
     }
 
+    func testContentSearch() throws {
+        try write("deck.html", "<html><head><style>.quarterly { color: red }</style></head><body><h1>Roadmap</h1><p>Quarterly numbers improved.</p><script>var quarterlyScript = 1;</script></body></html>")
+        store.rescan()
+        let doc = store.docs[0]
+
+        XCTAssertNotNil(store.contentSnippet(doc, matching: "quarterly numbers"))
+        XCTAssertTrue(store.contentSnippet(doc, matching: "quarterly")!.contains("Quarterly numbers"))
+        XCTAssertNil(store.contentSnippet(doc, matching: "quarterlyScript"))
+        XCTAssertNil(store.contentSnippet(doc, matching: "color: red"))
+    }
+
     func testFavoriteToggle() throws {
         try write("f.html", "<html><body></body></html>")
         store.rescan()
