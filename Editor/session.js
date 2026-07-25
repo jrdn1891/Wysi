@@ -9,12 +9,7 @@ let mode = 'preview';
 let flushTimer = null;
 
 const agentSrc = (await (await fetch('wy-agent.js')).text()).replace(/<\/script/gi, '<\\/script');
-
-const FIND_AGENT = `<script>addEventListener('message', (e) => {
-  const m = e.data;
-  if (!m || m.type !== 'wy-find') return;
-  parent.postMessage({ type: 'wy-found', found: !!window.find(m.text, false, !!m.backwards, true, false, false, false) }, '*');
-});<\/script>`;
+const playSrc = (await (await fetch('wy-play.js')).text()).replace(/<\/script/gi, '<\\/script');
 
 function notify(msg) {
   if (native) native.postMessage(msg);
@@ -51,7 +46,7 @@ function nodeAtPath(root, path) {
 function render() {
   if (!canonical) return;
   if (mode !== 'edit') hideFilm();
-  iframe.srcdoc = mode === 'edit' ? snapshot() + `<script>${agentSrc}</script>` : serialize() + FIND_AGENT;
+  iframe.srcdoc = mode === 'edit' ? snapshot() + `<script>${agentSrc}</script>` : serialize() + `<script>${playSrc}</script>`;
 }
 
 function applyOps(ops) {

@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: laser pointer</title>
+<style>
+#results { position: fixed; top: 0; right: 0; z-index: 9999; background: #fff; margin: 0; }
+body { margin: 0; }
+#stage { width: 100vw; height: 100vh; background: #222; }
+</style>
+<pre id="results">running…</pre>
+<div id="stage"></div>
+<script>
+const results = [];
+let advances = 0;
+document.getElementById('stage').addEventListener('click', () => { advances += 1; });
+
+function check(name, ok, detail) {
+  results.push({ name, ok, ...(detail ? { detail } : {}) });
+}
+function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+function pointer(type, x, y) {
+  document.getElementById('stage').dispatchEvent(new PointerEvent(type, {
+    bubbles: true, cancelable: true, pointerId: 1, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y,
+  }));
+}
+function click(x, y) {
+  document.getElementById('stage').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+}
+function laserCanvas() {
+  return document.querySelector('[data-wy-laser]');
+}
+function alphaAt(x, y) {
+  const canvas = laserCanvas();
+  if (!canvas) return 0;
+  const dpr = canvas.width / innerWidth;
+  return canvas.getContext('2d').getImageData(Math.round(x * dpr), Math.round(y * dpr), 1, 1).data[3];
+}
+
+async function run() {
+  await wait(50);
+
+  pointer('pointerdown', 100, 100);
+  pointer('pointerup', 100, 100);
+  click(100, 100);
+  await wait(50);
+  check('quick click reaches the deck', advances === 1);
+  check('quick click draws no laser', !laserCanvas());
+
+  pointer('pointerdown', 200, 200);
+  for (let i = 1; i <= 8; i++) pointer('pointermove', 200 + i * 10, 200);
+  await wait(50);
+  check('drag creates the laser overlay', !!laserCanvas());
+  check('trail visible while held', alphaAt(240, 200) > 0);
+  pointer('pointerup', 280, 200);
+  click(280, 200);
+  await wait(50);
+  check('drag click swallowed', advances === 1);
+  check('trail still visible right after release', alphaAt(240, 200) > 0);
+  await wait(1300);
+  check('trail faded out after a second', alphaAt(240, 200) === 0);
+
+  pointer('pointerdown', 300, 300);
+  await wait(400);
+  check('hold without moving lasers', alphaAt(300, 300) > 0);
+  pointer('pointerup', 300, 300);
+  click(300, 300);
+  await wait(50);
+  check('hold click swallowed', advances === 1);
+
+  const found = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 2000);
+    addEventListener('message', function handler(e) {
+      if (e.data?.type !== 'wy-found') return;
+      clearTimeout(timer);
+      removeEventListener('message', handler);
+      resolve(e.data.found);
+    });
+    postMessage({ type: 'wy-find', text: 'running', backwards: false }, '*');
+  });
+  check('find helper still answers', found === true);
+
+  const pass = results.every(r => r.ok);
+  document.getElementById('results').textContent =
+    'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+  document.title = 'SPIKE-DONE';
+}
+run();
+</script>
+<script src="/Editor/wy-play.js"></script>

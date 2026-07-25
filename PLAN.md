@@ -90,7 +90,7 @@ Undo lives in `NSUndoManager` as full-document string snapshots (quickhost's mod
 
 ## The editor window
 
-**Modes.** Opens in **Preview**: the live document, scripts running — dashboards render their charts, stacked decks animate. **Edit** (toolbar toggle, Cmd-E) re-renders the paused snapshot with the agent injected; **Done/Esc** returns to Preview. **Play** (decks only) presents the live document full-screen.
+**Modes.** Opens in **Preview**: the live document, scripts running — dashboards render their charts, stacked decks animate. **Edit** (toolbar toggle, Cmd-E) re-renders the paused snapshot with the agent injected; **Done/Esc** returns to Preview. **Play** presents the live document full-screen. Preview/Play include a **laser pointer**: click-drag (or press-and-hold) draws a glowing trail for circling things — held strokes persist, released strokes fade over a second — and a laser gesture swallows its click so decks that advance on click don't jump; a quick tap still advances.
 
 **Editing interactions** (all inside the iframe, all emitting ops):
 
