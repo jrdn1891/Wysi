@@ -64,6 +64,7 @@ struct LibraryView: View {
         }
         .animation(.default, value: chrome.sidebarVisible)
         .frame(minWidth: 780, minHeight: 460)
+        .background(VisualEffectBackground().ignoresSafeArea())
         .dropDestination(for: URL.self) { urls, _ in
             store.importFiles(urls)
             return true
@@ -262,6 +263,18 @@ private struct DocCard<Menu: View>: View {
         .contextMenu { menu() }
         .onDrag { NSItemProvider(contentsOf: doc.url) ?? NSItemProvider() }
     }
+}
+
+private struct VisualEffectBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .underWindowBackground
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
 private let thumbnailViewport = NSSize(width: 1280, height: 800)
