@@ -748,7 +748,7 @@
   function makeColorInput(prop) {
     const input = document.createElement('input');
     input.type = 'color';
-    input.setAttribute('style', 'position:fixed;left:-9999px;top:0');
+    input.setAttribute('style', 'position:fixed;opacity:0;pointer-events:none');
     input.addEventListener('input', () => {
       if (!barTarget) return;
       setInline(barTarget, prop, input.value);
@@ -760,13 +760,18 @@
       emitStyle(barTarget);
       refreshBar();
     });
-    document.documentElement.appendChild(input);
+    formatBar.appendChild(input);
     return input;
   }
 
-  function pickColor(input, prop) {
+  function pickColor(input, btn, prop) {
     const el = barTarget;
     if (!el) return;
+    const r = btn.getBoundingClientRect();
+    input.style.left = `${r.left}px`;
+    input.style.top = `${r.top}px`;
+    input.style.width = `${r.width}px`;
+    input.style.height = `${r.height}px`;
     input.value = toHex(normalizeColor(getComputedStyle(el).getPropertyValue(prop)) || { r: 0, g: 0, b: 0 });
     input.click();
   }
@@ -799,8 +804,8 @@
     barAlign = mk('↤', 'alignment', cycleAlign);
     barColorInput = makeColorInput('color');
     barBgInput = makeColorInput('background-color');
-    barColorBtn = mk('A', 'text color', () => pickColor(barColorInput, 'color'));
-    barBgBtn = mk('◼', 'background color', () => pickColor(barBgInput, 'background-color'));
+    barColorBtn = mk('A', 'text color', () => pickColor(barColorInput, barColorBtn, 'color'));
+    barBgBtn = mk('◼', 'background color', () => pickColor(barBgInput, barBgBtn, 'background-color'));
     document.documentElement.appendChild(formatBar);
     return formatBar;
   }

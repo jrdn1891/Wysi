@@ -87,6 +87,13 @@ async function run() {
   check('override escalated to !important', (stubborn.getAttribute('style') || '').includes('!important'));
   check('color emits style op', ops.some(o => o.name === 'style' && o.value.includes('color')));
 
+  let pickerClick = null;
+  colorInput.addEventListener('click', (e) => { pickerClick = e; }, { once: true });
+  barButton('text color').click();
+  await tick();
+  check('text color button keeps the bar open', barVisible());
+  check('text color button activates the picker', !!pickerClick && !pickerClick.defaultPrevented);
+
   clickAt(document.getElementById('empty-zone'));
   await tick();
   check('click away hides the bar', !barVisible());
