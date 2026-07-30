@@ -2,6 +2,13 @@
 <meta charset="utf-8">
 <title>spike: edit agent</title>
 <pre id="results">running…</pre>
+<style>
+  .frame img{display:none;width:100px;height:60px;object-fit:cover}
+  .frame .ph{height:60px;background:#eee}
+  .frame.filled img{display:block}
+  .frame.filled .ph{display:none}
+  .crop{display:block;width:100px;height:60px;object-fit:cover;object-position:0% 0%}
+</style>
 <div id="content">
   <h1 id="title">Original heading</h1>
   <p id="para">Original <strong id="bold">rich</strong> paragraph.</p>
@@ -16,11 +23,17 @@
     <div class="card"><h3>Card B</h3></div>
     <div class="card"><h3>Card C</h3></div>
   </div>
+  <figure class="frame" id="slot">
+    <img id="slotimg" src="images/missing.png" alt="empty slot">
+    <div class="ph" id="ph">images/missing.png</div>
+  </figure>
+  <img class="crop" id="crop" alt="wide">
 </div>
 <script>
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const results = [];
 const ops = [];
+const batches = [];
 const got = { flushed: false };
 
 function pngFile() {
@@ -55,7 +68,7 @@ function clickAt(el) {
 addEventListener('message', (e) => {
   const m = e.data;
   if (!m || typeof m.type !== 'string') return;
-  if (m.type === 'wy-ops') ops.push(...m.ops);
+  if (m.type === 'wy-ops') { batches.push(m.ops.length); ops.push(...m.ops); }
   if (m.type === 'wy-flushed') got.flushed = true;
 });
 
@@ -146,6 +159,53 @@ async function run() {
   const order = [...document.querySelectorAll('#cards h3')].map(h => h.textContent);
   check('card moved before its sibling', JSON.stringify(order) === JSON.stringify(['Card B', 'Card A', 'Card C']), order.join(','));
   check('drag ghost styling cleaned up', !cardB.getAttribute('style'));
+
+  ops.length = 0;
+  batches.length = 0;
+  const slot = document.getElementById('slot');
+  const slotImg = document.getElementById('slotimg');
+  const slotPath = pathOf(slotImg);
+  dropOn(document.getElementById('ph'));
+  for (let i = 0; i < 20 && !ops.length; i++) await tick();
+  const slotSrc = ops.find(o => o.kind === 'setAttr' && o.name === 'src');
+  const classOp = ops.find(o => o.kind === 'setAttr' && o.name === 'class');
+  check('drop on a placeholder fills the hidden img', !!slotSrc && JSON.stringify(slotSrc.path) === JSON.stringify(slotPath));
+  check('reveal emits the unused state class', !!classOp && classOp.value === 'frame filled', classOp && classOp.value);
+  check('state class op targets the slot container', !!classOp && JSON.stringify(classOp.path) === JSON.stringify(pathOf(slot)));
+  check('filled img renders in edit mode', slotImg.getBoundingClientRect().height > 0);
+  check('fill is a single op batch', batches.length === 1, JSON.stringify(batches));
+
+  ops.length = 0;
+  const crop = document.getElementById('crop');
+  const wide = document.createElement('canvas');
+  wide.width = 4;
+  wide.height = 1;
+  crop.src = wide.toDataURL('image/png');
+  await crop.decode();
+  const cr = crop.getBoundingClientRect();
+  crop.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: cr.left + 5, clientY: cr.top + 5 }));
+  await tick();
+  check('hovering a cropped image marks it pannable', crop.hasAttribute('data-wy-pan'));
+  crop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerId: 2, clientX: cr.left + 80, clientY: cr.top + 30 }));
+  document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 2, clientX: cr.left + 10, clientY: cr.top + 30 }));
+  document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 2, clientX: cr.left + 10, clientY: cr.top + 30 }));
+  await tick();
+  check('pan drag repositions the crop', crop.style.objectPosition === '50% 0%', crop.style.objectPosition);
+  const panOp = ops.find(o => o.kind === 'setAttr' && o.name === 'style');
+  check('pan emits setAttr style op', !!panOp && JSON.stringify(panOp.path) === JSON.stringify(pathOf(crop)));
+  check('pan op carries object-position', !!panOp && panOp.value.includes('object-position'));
+
+  ops.length = 0;
+  const flat = document.getElementById('pic');
+  const fr = flat.getBoundingClientRect();
+  flat.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: fr.left + 5, clientY: fr.top + 5 }));
+  await tick();
+  check('uncropped image is not pannable', !flat.hasAttribute('data-wy-pan'));
+  flat.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerId: 3, clientX: fr.left + 5, clientY: fr.top + 5 }));
+  document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 3, clientX: fr.left + 40, clientY: fr.top + 5 }));
+  document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 3, clientX: fr.left + 40, clientY: fr.top + 5 }));
+  await tick();
+  check('dragging an uncropped image emits nothing', ops.length === 0, JSON.stringify(ops));
 
   const pass = results.every(r => r.ok);
   document.getElementById('results').textContent =

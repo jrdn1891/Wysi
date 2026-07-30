@@ -7,7 +7,7 @@
 Agents produce HTML — slide decks, landing pages, dashboards. WYSI is where humans polish it before sharing:
 
 - **Click any text to rewrite it.** Plain-text editing with Escape to cancel, Enter to commit.
-- **Drop in a replacement image.** From Finder or a picker; images inline as data URIs so files stay self-contained.
+- **Drop in an image.** Onto an existing one, or onto an empty slot the agent left behind; drag a cropped image to reposition what shows. From Finder or a picker; images inline as data URIs so files stay self-contained.
 - **Manage slides in a filmstrip.** Reorder by drag, delete, duplicate — works for scroll decks, stacked decks, and opacity/visibility overlay decks.
 - **Re-theme the whole document.** A native panel edits the `:root` CSS variables and body colors/fonts agent HTML already defines, patching declarations in place.
 - **Format any element.** Bold/italic, size, colors, alignment via a bar on the editing ring.
