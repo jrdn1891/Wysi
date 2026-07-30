@@ -1,0 +1,139 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: resize grips</title>
+<style>
+#results { position: fixed; top: 0; right: 0; z-index: 9999; background: #fff; margin: 0; }
+body { margin: 0; padding: 8px 8px 40px; font: 13px system-ui; }
+#grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 620px }
+#grid > div { height: 60px; background: #eef }
+#scaled { transform: scale(1.25); transform-origin: 0 0; width: 400px }
+#sgrid { display: grid; grid-template-columns: 1fr 1fr; width: 400px }
+#sgrid > div { height: 40px; background: #efe }
+#flex { display: flex; gap: 10px; width: 620px }
+#flex > div { flex: 1; height: 40px; background: #fee }
+#flow { width: 500px }
+#border { box-sizing: border-box; padding: 12px; border: 2px solid #ccc; height: 40px }
+#content { box-sizing: content-box; padding: 10px; height: 20px }
+</style>
+<pre id="results">running…</pre>
+
+<div id="grid"><div id="g0"></div><div id="g1"></div><div id="g2"></div></div>
+<div id="scaled"><div id="sgrid"><div id="s0"></div><div id="s1"></div></div></div>
+<div id="flex"><div id="f0"></div><div id="f1"></div><div id="f2"></div></div>
+<div id="flow"><div id="border"></div><div id="content"></div></div>
+
+<script>
+const results = [];
+const ops = [];
+
+function check(name, ok, detail) {
+  results.push({ name, ok, ...(detail ? { detail } : {}) });
+}
+function tick() { return new Promise(r => setTimeout(r, 50)); }
+function nodeAt(path) {
+  let n = document.body;
+  for (const i of path) n = n && n.childNodes[i];
+  return n;
+}
+function styleOp() {
+  return [...ops].reverse().find(o => o.kind === 'setAttr' && o.name === 'style');
+}
+function grip(side) {
+  const g = document.querySelector(`[data-wy-grip=${side}]`);
+  return g && g.style.display !== 'none' ? g : null;
+}
+async function hover(el) {
+  const r = el.getBoundingClientRect();
+  el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: r.left + 2, clientY: r.top + 2 }));
+  await tick();
+}
+async function drag(side, dx, dy) {
+  const g = grip(side);
+  const r = g.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  g.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX: x, clientY: y }));
+  await tick();
+  g.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: x + dx, clientY: y + dy }));
+  await tick();
+  g.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: x + dx, clientY: y + dy }));
+  await tick();
+}
+function widths(sel) {
+  return [...document.querySelectorAll(sel)].map(el => el.offsetWidth).join(',');
+}
+
+addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || typeof m.type !== 'string') return;
+  if (m.type === 'wy-ops') ops.push(...m.ops);
+});
+
+async function run() {
+  await tick();
+  const grid = document.getElementById('grid');
+
+  await hover(document.getElementById('g0'));
+  check('grid item shows a seam grip', !!grip('right'));
+  check('no grip on the grid outer edge', !grip('left'));
+  check('no grip where the axis has no seam', !grip('bottom'));
+
+  ops.length = 0;
+  await drag('right', 60, 0);
+  check('seam drag resizes both tracks', widths('#grid > div') === '260,140,200', widths('#grid > div'));
+  check('container size unchanged', grid.offsetWidth === 620, grid.offsetWidth);
+  const gridOp = styleOp();
+  check('seam op targets the grid container', !!gridOp && nodeAt(gridOp.path) === grid);
+  check('tracks written as fr', !!gridOp && /fr/.test(gridOp.value) && !/px/.test(gridOp.value), gridOp && gridOp.value);
+
+  ops.length = 0;
+  await hover(document.getElementById('g2'));
+  check('near-side seam grip appears', !!grip('left'));
+  await drag('left', -30, 0);
+  check('near-side drag moves its own seam', widths('#grid > div') === '260,110,230', widths('#grid > div'));
+
+  ops.length = 0;
+  await hover(document.getElementById('s0'));
+  await drag('right', 50, 0);
+  check('drag delta divided by the canvas scale', widths('#sgrid > div') === '240,160', widths('#sgrid > div'));
+
+  ops.length = 0;
+  await hover(document.getElementById('f0'));
+  await drag('right', 60, 0);
+  check('flex main axis pins the item', widths('#flex > div') === '260,170,170', widths('#flex > div'));
+  const flexOp = styleOp();
+  check('flex op targets the item', !!flexOp && nodeAt(flexOp.path) === document.getElementById('f0'));
+  check('flex op writes the shorthand', !!flexOp && /flex:\s*0 0 260px/.test(flexOp.value), flexOp && flexOp.value);
+
+  ops.length = 0;
+  await hover(document.getElementById('border'));
+  await drag('right', -100, 0);
+  check('border-box width round-trips', document.getElementById('border').offsetWidth === 400, document.getElementById('border').offsetWidth);
+
+  ops.length = 0;
+  await hover(document.getElementById('content'));
+  await drag('right', -100, 0);
+  check('content-box width round-trips', document.getElementById('content').offsetWidth === 400, document.getElementById('content').offsetWidth);
+  const sizeOp = styleOp();
+  check('size op targets the element', !!sizeOp && nodeAt(sizeOp.path) === document.getElementById('content'));
+
+  ops.length = 0;
+  await hover(document.getElementById('g1'));
+  const still = grip('right');
+  const sr = still.getBoundingClientRect();
+  const at = { bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX: sr.left + 3, clientY: sr.top + 3 };
+  still.dispatchEvent(new PointerEvent('pointerdown', at));
+  still.dispatchEvent(new PointerEvent('pointerup', at));
+  still.dispatchEvent(new MouseEvent('click', at));
+  await tick();
+  check('a grip click emits nothing', ops.length === 0, JSON.stringify(ops));
+  check('a grip click starts no text edit', !document.querySelector('[contenteditable]'));
+
+  const pass = results.every(r => r.ok);
+  document.getElementById('results').textContent =
+    'SPIKE-' + (pass ? 'PASS' : 'FAIL') + '\n' + JSON.stringify(results, null, 2);
+  document.title = 'SPIKE-DONE';
+}
+run();
+</script>
+<script src="/Editor/wy-agent.js"></script>

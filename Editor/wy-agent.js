@@ -8,6 +8,9 @@
   const INLINE_LIMIT = 300 * 1024;
   const MAX_DIM = 1600;
   const MAX_DATA = 2.5 * 1024 * 1024;
+  const GRIP_SIDES = { left: 'ew-resize', right: 'ew-resize', top: 'ns-resize', bottom: 'ns-resize' };
+  const SEAM_TOL = 1.5;
+  const MIN_SIZE = 24;
 
   let editingEl = null;
   let editOrigHtml = null;
@@ -31,6 +34,10 @@
   let barBgBtn = null;
   let barColorInput = null;
   let barBgInput = null;
+  const grips = {};
+  const gripModes = {};
+  let gripEl = null;
+  let resizing = null;
 
   function send(msg) {
     parent.postMessage(msg, '*');
@@ -372,6 +379,7 @@
     if (replacePill && replacePill.contains(e.target)) return;
     if (moveHandle && moveHandle.contains(e.target)) return;
     if (formatBar && formatBar.contains(e.target)) return;
+    if (isGrip(e.target)) return;
     if (editingEl && editingEl.contains(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -390,18 +398,21 @@
   }, true);
 
   document.addEventListener('pointermove', (e) => {
-    if (editingEl || movingEl) return;
+    if (editingEl || movingEl || resizing) return;
     if (replacePill && replacePill.contains(e.target)) return;
     if (moveHandle && moveHandle.contains(e.target)) return;
     if (formatBar && formatBar.contains(e.target)) return;
+    if (isGrip(e.target)) return;
     const t = htmlAncestor(e.target);
     if (!t) {
       hideRing();
       hideReplacePill();
       hideMoveHandle();
+      hideGrips();
       return;
     }
     showMoveHandle(moveTarget(t));
+    showGrips(boxTarget(t));
     const media = mediaAncestor(t);
     if (media) {
       showRing(media, false);
@@ -548,13 +559,24 @@
     return out.length <= MAX_DATA ? out : null;
   }
 
-  function moveTarget(start) {
-    for (let n = start; n && n !== document.body; n = n.parentElement) {
-      const same = [...n.parentElement.children].filter(c => c.tagName === n.tagName);
+  function repeatedUnit(el) {
+    return [...el.parentElement.children].filter(c => c.tagName === el.tagName).length >= 2;
+  }
+
+  function ancestorBox(start, ok) {
+    for (let n = start; n && n !== document.body && n.parentElement; n = n.parentElement) {
       const r = n.getBoundingClientRect();
-      if (same.length >= 2 && r.width && r.height) return n;
+      if (r.width && r.height && ok(n)) return n;
     }
     return null;
+  }
+
+  function moveTarget(start) {
+    return ancestorBox(start, repeatedUnit);
+  }
+
+  function boxTarget(start) {
+    return ancestorBox(start, n => repeatedUnit(n) || /flex|grid/.test(getComputedStyle(n.parentElement).display));
   }
 
   function ensureMoveHandle() {
@@ -651,6 +673,7 @@
     hideRing();
     hideReplacePill();
     hideFormatBar();
+    hideGrips();
     moveHandle.addEventListener('pointermove', onMoveDrag);
     moveHandle.addEventListener('pointerup', endMoveDrag);
     moveHandle.addEventListener('pointercancel', endMoveDrag);
@@ -685,6 +708,168 @@
     if (!path || (ref && !before)) return;
     el.parentNode.insertBefore(el, ref);
     sendOps([{ kind: 'move', path, before }]);
+  }
+
+  function localScale(el) {
+    return el.offsetWidth ? el.getBoundingClientRect().width / el.offsetWidth : 1;
+  }
+
+  function trackBands(parent, axis) {
+    const cs = getComputedStyle(parent);
+    const list = (axis === 'x' ? cs.gridTemplateColumns : cs.gridTemplateRows).split(' ').map(parseFloat);
+    if (list.length < 2 || list.some(n => !isFinite(n))) return null;
+    return { list, gap: parseFloat(axis === 'x' ? cs.columnGap : cs.rowGap) || 0 };
+  }
+
+  function seamAt(el, parent, side, axis) {
+    const bands = trackBands(parent, axis);
+    if (!bands) return null;
+    const k = localScale(parent);
+    const pr = parent.getBoundingClientRect();
+    const pcs = getComputedStyle(parent);
+    const r = el.getBoundingClientRect();
+    const near = side === 'left' || side === 'top';
+    const origin = axis === 'x'
+      ? pr.left + (parseFloat(pcs.borderLeftWidth) + parseFloat(pcs.paddingLeft)) * k
+      : pr.top + (parseFloat(pcs.borderTopWidth) + parseFloat(pcs.paddingTop)) * k;
+    const edge = ((axis === 'x' ? (near ? r.left : r.right) : (near ? r.top : r.bottom)) - origin) / k;
+    let at = 0;
+    for (let i = 0; i < bands.list.length; i++) {
+      if (near && i && Math.abs(edge - at) <= SEAM_TOL) return i - 1;
+      at += bands.list[i];
+      if (!near && i < bands.list.length - 1 && Math.abs(edge - at) <= SEAM_TOL) return i;
+      at += bands.gap;
+    }
+    return null;
+  }
+
+  function resizeMode(el, side) {
+    const parent = el.parentElement;
+    const axis = side === 'left' || side === 'right' ? 'x' : 'y';
+    const pos = getComputedStyle(el).position;
+    const display = pos === 'absolute' || pos === 'fixed' ? '' : getComputedStyle(parent).display;
+    if (/grid/.test(display)) {
+      const seam = seamAt(el, parent, side, axis);
+      return seam === null ? null : { kind: 'grid', axis, seam, parent };
+    }
+    if (side === 'left' || side === 'top') return null;
+    const main = /flex/.test(display) && getComputedStyle(parent).flexDirection === (axis === 'x' ? 'row' : 'column');
+    return { kind: main ? 'flex' : 'size', axis };
+  }
+
+  function isGrip(node) {
+    return node instanceof Element && node.hasAttribute('data-wy-grip');
+  }
+
+  function ensureGrip(side) {
+    if (grips[side]) return grips[side];
+    const g = document.createElement('div');
+    g.setAttribute('data-wy-grip', side);
+    g.setAttribute('style', `position:fixed;z-index:2147483646;display:none;border-radius:3px;cursor:${GRIP_SIDES[side]};touch-action:none`);
+    g.addEventListener('pointerenter', () => { if (gripEl) showRing(gripEl, true); });
+    g.addEventListener('pointerdown', (e) => startResize(e, side));
+    document.documentElement.appendChild(g);
+    grips[side] = g;
+    return g;
+  }
+
+  function placeGrip(side, r) {
+    const horiz = side === 'left' || side === 'right';
+    const g = grips[side];
+    g.style.background = ACCENT;
+    g.style.display = 'block';
+    g.style.width = `${horiz ? 6 : 28}px`;
+    g.style.height = `${horiz ? 28 : 6}px`;
+    g.style.left = `${(horiz ? (side === 'left' ? r.left : r.right) : (r.left + r.right) / 2) - (horiz ? 3 : 14)}px`;
+    g.style.top = `${(horiz ? (r.top + r.bottom) / 2 : (side === 'top' ? r.top : r.bottom)) - (horiz ? 14 : 3)}px`;
+  }
+
+  function showGrips(el) {
+    if (!el) return hideGrips();
+    const r = el.getBoundingClientRect();
+    if (!inViewport(r)) return hideGrips();
+    if (gripEl !== el) {
+      gripEl = el;
+      for (const side of Object.keys(GRIP_SIDES)) {
+        ensureGrip(side);
+        gripModes[side] = resizeMode(el, side);
+      }
+    }
+    for (const side of Object.keys(GRIP_SIDES)) {
+      if (gripModes[side]) placeGrip(side, r);
+      else grips[side].style.display = 'none';
+    }
+  }
+
+  function hideGrips() {
+    gripEl = null;
+    for (const g of Object.values(grips)) g.style.display = 'none';
+  }
+
+  function startResize(e, side) {
+    const el = gripEl;
+    const mode = gripModes[side];
+    if (e.button !== 0 || !el || !mode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const g = grips[side];
+    try { g.setPointerCapture(e.pointerId); } catch {}
+    resizing = {
+      el,
+      side,
+      mode,
+      moved: false,
+      k: localScale(mode.kind === 'grid' ? mode.parent : el),
+      from: mode.axis === 'x' ? e.clientX : e.clientY,
+      bands: mode.kind === 'grid' ? trackBands(mode.parent, mode.axis) : null,
+      base: mode.kind === 'grid' ? 0 : parseFloat(getComputedStyle(el)[mode.axis === 'x' ? 'width' : 'height']),
+    };
+    for (const s of Object.keys(GRIP_SIDES)) if (s !== side) grips[s].style.display = 'none';
+    hideReplacePill();
+    hideMoveHandle();
+    hideFormatBar();
+    showRing(el, true);
+    g.addEventListener('pointermove', onResizeDrag);
+    g.addEventListener('pointerup', endResize);
+    g.addEventListener('pointercancel', endResize);
+  }
+
+  function applyResize(d) {
+    const { el, mode, bands, base } = resizing;
+    if (mode.kind === 'grid') {
+      const list = bands.list.slice();
+      const shift = Math.max(MIN_SIZE - list[mode.seam], Math.min(list[mode.seam + 1] - MIN_SIZE, d));
+      list[mode.seam] += shift;
+      list[mode.seam + 1] -= shift;
+      const total = list.reduce((a, b) => a + b, 0);
+      setInline(mode.parent, mode.axis === 'x' ? 'grid-template-columns' : 'grid-template-rows',
+        list.map(n => `${+(n / total * list.length).toFixed(4)}fr`).join(' '));
+      return;
+    }
+    const size = Math.max(MIN_SIZE, Math.round((base + d) * 2) / 2);
+    if (mode.kind === 'flex') setInline(el, 'flex', `0 0 ${size}px`);
+    else setInline(el, mode.axis === 'x' ? 'width' : 'height', `${size}px`);
+  }
+
+  function onResizeDrag(e) {
+    const d = ((resizing.mode.axis === 'x' ? e.clientX : e.clientY) - resizing.from) / resizing.k;
+    if (!resizing.moved && Math.abs(d) < 0.5) return;
+    resizing.moved = true;
+    applyResize(d);
+    showRing(resizing.el, true);
+    placeGrip(resizing.side, resizing.el.getBoundingClientRect());
+  }
+
+  function endResize() {
+    const { el, mode, side, moved } = resizing;
+    const g = grips[side];
+    g.removeEventListener('pointermove', onResizeDrag);
+    g.removeEventListener('pointerup', endResize);
+    g.removeEventListener('pointercancel', endResize);
+    resizing = null;
+    hideRing();
+    hideGrips();
+    if (moved) emitStyle(mode.kind === 'grid' ? mode.parent : el);
   }
 
   function setInline(el, prop, value) {
@@ -853,6 +1038,7 @@
     else hideRing();
     hideReplacePill();
     hideMoveHandle();
+    hideGrips();
     positionFormatBar();
   }, true);
 
