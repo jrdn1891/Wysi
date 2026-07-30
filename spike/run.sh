@@ -21,7 +21,7 @@ run_page() {
     fail=1
   fi
 }
-for page in paths agent slides stacked-slides overlay-slides theme format laser film; do
+for page in paths agent slides stacked-slides overlay-slides theme format resize laser film; do
   run_page "$page" "" "$page"
 done
 run_page laser --force-device-scale-factor=2 "laser@2x"

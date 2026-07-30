@@ -11,6 +11,7 @@ Agents produce HTML — slide decks, landing pages, dashboards. WYSI is where hu
 - **Manage slides in a filmstrip.** Reorder by drag, delete, duplicate — works for scroll decks, stacked decks, and opacity/visibility overlay decks.
 - **Re-theme the whole document.** A native panel edits the `:root` CSS variables and body colors/fonts agent HTML already defines, patching declarations in place.
 - **Format any element.** Bold/italic, size, colors, alignment via a bar on the editing ring.
+- **Resize the boxes.** Drag an edge grip: grid tiles move the shared track, flex items get pinned, anything else takes a width or height.
 - **A library of your files.** Live first-screen thumbnails, favorites (stored as Finder tags), full-text search, list and grid views. Files stay plain `.html` on disk — agents can keep rewriting them and WYSI reloads live.
 
 Undo, find (⌘F), and save are native. The saved file differs from the original only where you edited.
