@@ -18,7 +18,9 @@
   let replacePill = null;
   let pillImg = null;
   let filePicker = null;
-  let dropImg = null;
+  let dropTarget = null;
+  let unusedClasses = null;
+  let panning = null;
   let moveHandle = null;
   let moveLine = null;
   let moveEl = null;
@@ -398,7 +400,7 @@
   }, true);
 
   document.addEventListener('pointermove', (e) => {
-    if (editingEl || movingEl || resizing) return;
+    if (editingEl || movingEl || resizing || panning) return;
     if (replacePill && replacePill.contains(e.target)) return;
     if (moveHandle && moveHandle.contains(e.target)) return;
     if (formatBar && formatBar.contains(e.target)) return;
@@ -449,7 +451,9 @@
     if (media.tagName !== 'IMG') return hideReplacePill();
     const r = media.getBoundingClientRect();
     if (!r.width || !r.height || !inViewport(r)) return hideReplacePill();
+    if (pillImg && pillImg !== media) pillImg.removeAttribute('data-wy-pan');
     pillImg = media;
+    if (cropOverflow(media)) media.setAttribute('data-wy-pan', '');
     const b = ensureReplacePill();
     b.style.background = ACCENT;
     b.style.borderColor = ACCENT;
@@ -459,6 +463,7 @@
   }
 
   function hideReplacePill() {
+    if (pillImg) pillImg.removeAttribute('data-wy-pan');
     pillImg = null;
     if (replacePill) replacePill.style.display = 'none';
   }
@@ -479,18 +484,30 @@
     filePicker.click();
   }
 
-  function imgAtPoint(x, y) {
-    const n = document.elementFromPoint(x, y);
-    const t = n && htmlAncestor(n);
-    const media = t && mediaAncestor(t);
-    return media && media.tagName === 'IMG' ? media : null;
+  function rendered(el) {
+    const r = el.getBoundingClientRect();
+    return !!(r.width && r.height);
+  }
+
+  function dropTargetAt(x, y) {
+    const node = document.elementFromPoint(x, y);
+    const t = node && htmlAncestor(node);
+    if (!t) return null;
+    const media = mediaAncestor(t);
+    if (media) return media.tagName === 'IMG' ? { img: media, box: media } : null;
+    for (let n = t; n && n !== document.body; n = n.parentElement) {
+      const imgs = n.querySelectorAll('img');
+      if (!imgs.length) continue;
+      return imgs.length === 1 && !rendered(imgs[0]) ? { img: imgs[0], box: n } : null;
+    }
+    return null;
   }
 
   document.addEventListener('dragover', (e) => {
     e.preventDefault();
-    dropImg = imgAtPoint(e.clientX, e.clientY);
-    if (dropImg) {
-      showRing(dropImg, true);
+    dropTarget = dropTargetAt(e.clientX, e.clientY);
+    if (dropTarget) {
+      showRing(dropTarget.box, true);
       e.dataTransfer.dropEffect = 'copy';
     } else {
       hideRing();
@@ -499,16 +516,55 @@
 
   document.addEventListener('drop', (e) => {
     e.preventDefault();
-    const img = dropImg || imgAtPoint(e.clientX, e.clientY);
-    dropImg = null;
+    const target = dropTarget || dropTargetAt(e.clientX, e.clientY);
+    dropTarget = null;
     hideRing();
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (img && f) replaceImage(img, f);
+    if (target && f) replaceImage(target.img, f);
   });
+
+  function stateClasses() {
+    if (unusedClasses) return unusedClasses;
+    unusedClasses = [];
+    const seen = new Set();
+    const walk = (rules) => {
+      for (const rule of rules) {
+        if (rule.cssRules) walk(rule.cssRules);
+        if (!rule.selectorText) continue;
+        for (const [, cls] of rule.selectorText.matchAll(/\.([\w-]+)/g)) {
+          if (seen.has(cls)) continue;
+          seen.add(cls);
+          if (!document.querySelector(`.${CSS.escape(cls)}`)) unusedClasses.push(cls);
+        }
+      }
+    };
+    for (const sheet of document.styleSheets) {
+      try { walk(sheet.cssRules); } catch {}
+    }
+    return unusedClasses;
+  }
+
+  function revealOps(img) {
+    if (rendered(img)) return [];
+    for (let n = img.parentElement; n && n !== document.body; n = n.parentElement) {
+      for (const cls of stateClasses()) {
+        n.classList.add(cls);
+        if (rendered(img)) {
+          const path = pathOf(n);
+          return path ? [{ kind: 'setAttr', path, name: 'class', value: n.getAttribute('class') }] : [];
+        }
+        n.classList.remove(cls);
+      }
+    }
+    setInline(img, 'display', 'block');
+    const path = pathOf(img);
+    return path ? [styleOp(img, path)] : [];
+  }
 
   async function replaceImage(img, file) {
     const dataUri = await encodeImage(file);
     if (!dataUri) return send({ type: 'wy-error', message: 'unsupported image, or too large after compression' });
+    img.removeAttribute('data-wy-pan');
     const picture = img.closest('picture');
     if (picture) {
       for (const s of [...picture.querySelectorAll('source')]) s.remove();
@@ -529,7 +585,8 @@
         ops.push({ kind: 'setAttr', path, name: attr, value: null });
       }
     }
-    sendOps(ops);
+    await img.decode().catch(() => {});
+    sendOps(ops.concat(revealOps(img)));
   }
 
   function readAsDataUrl(file) {
@@ -558,6 +615,71 @@
     if (!out.startsWith('data:image/webp')) out = canvas.toDataURL('image/jpeg', 0.85);
     return out.length <= MAX_DATA ? out : null;
   }
+
+  function cropOverflow(img) {
+    if (getComputedStyle(img).objectFit !== 'cover') return null;
+    const r = img.getBoundingClientRect();
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    if (!nw || !nh || !r.width || !r.height) return null;
+    const s = Math.max(r.width / nw, r.height / nh);
+    const x = Math.max(0, nw * s - r.width);
+    const y = Math.max(0, nh * s - r.height);
+    return x > 0.5 || y > 0.5 ? { x, y } : null;
+  }
+
+  function objectPos(img, over) {
+    const parts = getComputedStyle(img).objectPosition.split(' ');
+    const pct = (v, span) => v.endsWith('%') ? parseFloat(v) : (span > 0.5 ? parseFloat(v) / span * 100 : 0);
+    return { x: pct(parts[0], over.x), y: pct(parts[1], over.y) };
+  }
+
+  function startPan(e, img) {
+    const over = cropOverflow(img);
+    if (!over) return;
+    e.preventDefault();
+    panning = { img, over, from: { x: e.clientX, y: e.clientY }, base: objectPos(img, over), moved: false };
+    hideReplacePill();
+    hideMoveHandle();
+    hideFormatBar();
+    hideGrips();
+    showRing(img, true);
+    document.addEventListener('pointermove', onPanDrag);
+    document.addEventListener('pointerup', endPan);
+    document.addEventListener('pointercancel', endPan);
+  }
+
+  function onPanDrag(e) {
+    const { img, over, from, base } = panning;
+    const dx = e.clientX - from.x;
+    const dy = e.clientY - from.y;
+    if (!panning.moved && Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    panning.moved = true;
+    const at = (b, d, span) => span < 0.5 ? b : Math.max(0, Math.min(100, b - d / span * 100));
+    setInline(img, 'object-position',
+      `${+at(base.x, dx, over.x).toFixed(2)}% ${+at(base.y, dy, over.y).toFixed(2)}%`);
+  }
+
+  function endPan() {
+    const { img, moved } = panning;
+    document.removeEventListener('pointermove', onPanDrag);
+    document.removeEventListener('pointerup', endPan);
+    document.removeEventListener('pointercancel', endPan);
+    panning = null;
+    hideRing();
+    if (moved) emitStyle(img);
+  }
+
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || editingEl || movingEl || resizing) return;
+    const t = htmlAncestor(e.target);
+    const media = t && mediaAncestor(t);
+    if (media && media.tagName === 'IMG') startPan(e, media);
+  });
+
+  document.addEventListener('dragstart', (e) => {
+    if (panning) e.preventDefault();
+  });
 
   function repeatedUnit(el) {
     return [...el.parentElement.children].filter(c => c.tagName === el.tagName).length >= 2;
@@ -880,11 +1002,14 @@
     }
   }
 
+  function styleOp(el, path) {
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+    return { kind: 'setAttr', path, name: 'style', value: el.getAttribute('style') };
+  }
+
   function emitStyle(el) {
     const path = pathOf(el);
-    if (!path) return;
-    if (!el.getAttribute('style')) el.removeAttribute('style');
-    sendOps([{ kind: 'setAttr', path, name: 'style', value: el.getAttribute('style') }]);
+    if (path) sendOps([styleOp(el, path)]);
   }
 
   function toHex(c) {
@@ -1228,7 +1353,7 @@
 
   function applyAccent() {
     ACCENT = sampleAccent();
-    placeholderStyle.textContent = `img[data-wy-placeholder]{outline:2px dashed ${ACCENT};outline-offset:2px}`;
+    placeholderStyle.textContent = `img[data-wy-placeholder]{outline:2px dashed ${ACCENT};outline-offset:2px}img[data-wy-pan]{cursor:grab}`;
   }
 
   applyAccent();
