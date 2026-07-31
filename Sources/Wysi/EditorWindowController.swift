@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 
-final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToolbarItemValidation, NSMenuItemValidation, WKUIDelegate, NSSharingServicePickerToolbarItemDelegate, NSPopoverDelegate {
+final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToolbarItemValidation, NSMenuItemValidation, WKUIDelegate, WKNavigationDelegate, NSSharingServicePickerToolbarItemDelegate, NSPopoverDelegate {
     private static let modeItem = NSToolbarItem.Identifier("mode")
     private static let playItem = NSToolbarItem.Identifier("play")
     private static let undoItem = NSToolbarItem.Identifier("undo")
@@ -54,6 +54,7 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isInspectable = true
         webView.uiDelegate = self
+        webView.navigationDelegate = self
         window.contentView = webView
         self.webView = webView
 
@@ -231,6 +232,15 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
         panel.beginSheetModal(for: window) { response in
             completionHandler(response == .OK ? panel.urls : nil)
         }
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard navigationAction.navigationType == .linkActivated,
+              let url = navigationAction.request.url,
+              url.scheme == "http" || url.scheme == "https"
+        else { return decisionHandler(.allow) }
+        decisionHandler(.cancel)
+        NSWorkspace.shared.open(url)
     }
 
     fileprivate func receive(_ type: String, _ body: [String: Any]) {
