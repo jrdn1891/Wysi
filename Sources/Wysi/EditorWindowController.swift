@@ -85,9 +85,28 @@ final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSToo
         setMode(mode == "edit" ? "preview" : "edit")
     }
 
+    @objc func toggleToolbar(_ sender: Any?) {
+        guard let window, let toolbar = window.toolbar else { return }
+        let hide = toolbar.isVisible
+        toolbar.isVisible = !hide
+        window.titleVisibility = hide ? .hidden : .visible
+        window.titlebarAppearsTransparent = hide
+        if hide {
+            window.styleMask.insert(.fullSizeContentView)
+        } else {
+            window.styleMask.remove(.fullSizeContentView)
+        }
+        for button: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(button)?.isHidden = hide
+        }
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(toggleMode(_:)) {
             menuItem.state = mode == "edit" ? .on : .off
+        }
+        if menuItem.action == #selector(toggleToolbar(_:)) {
+            menuItem.title = window?.toolbar?.isVisible == false ? "Show Toolbar" : "Hide Toolbar"
         }
         return true
     }
