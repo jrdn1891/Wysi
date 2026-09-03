@@ -85,6 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let view = NSMenu(title: "View")
         view.addItem(withTitle: "Edit Mode", action: #selector(EditorWindowController.toggleMode(_:)), keyEquivalent: "e")
+        let toolbar = view.addItem(withTitle: "Hide Toolbar", action: #selector(EditorWindowController.toggleToolbar(_:)), keyEquivalent: "t")
+        toolbar.keyEquivalentModifierMask = [.command, .option]
         main.addItem(submenu(view, title: "View"))
 
         let window = NSMenu(title: "Window")
